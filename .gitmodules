@@ -1,0 +1,3 @@
+[submodule "minivLLM/__workspace__/MinivLLM"]
+	path = minivLLM/__workspace__/MinivLLM
+	url = https://github.com/Wenyueh/MinivLLM.git

@@ -1289,13 +1289,13 @@ function setupCanvas(cv) {
     }
     status = 'AI 自动玩';
     // 实时决策：权重内嵌在页面里，每次点击都从训练环境的标准起点重新开局
-    const snake = [[5, 6], [4, 6], [3, 6]];
-    const dir = 'right';
+    let snake = [[5, 6], [4, 6], [3, 6]];
+    let dir = 'right';
     const occ = new Set(snake.map(p => p[0] + ',' + p[1]));
     const free = [];
     for (let x = 0; x < 12; x++) for (let y = 0; y < 12; y++)
       if (!occ.has(x + ',' + y)) free.push([x, y]);
-    const food = free[Math.floor(Math.random() * free.length)];
+    let food = free[Math.floor(Math.random() * free.length)];
     let foods = 0;
     document.getElementById('gScore').textContent = '0';
     document.getElementById('gFood').textContent = '0';
@@ -1373,7 +1373,6 @@ function setupCanvas(cv) {
     const rel = Object.keys(TURN[dir]).find(k => TURN[dir][k] === kd);
     pending = rel;   // 记录，等待下一 tick
   });
-  document.getElementById('gameRestart').addEventListener('click', reset);
   reset();
 })();
 

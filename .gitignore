@@ -1,15 +1,7 @@
 **__workspace___
 .DS_Store
 Thumbs.db
+.** 
 __pycache__/
 *.pyc
 site/
-
-# 笔记工具配置目录（Obsidian / Claude / Claudian），不入版本库
-.obsidian/
-.claude/
-.claudian/
-大语言模型/.obsidian/
-大语言模型/.claude/
-大语言模型/.claudian/
-

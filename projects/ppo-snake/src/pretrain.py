@@ -13,10 +13,15 @@
     python pretrain.py --eps-bc 0.1    # 数据收集时 10% 概率随机动作（增加多样性）
 """
 import argparse
+import os
 import sys
 import time
 
 import numpy as np
+
+# 保证从项目任意位置运行都能导入 src 包
+if __package__ in (None, ""):
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.snake_game import SnakeEnv, STATE_DIM, TURN, DIR_VEC
 from src.ppo import MLPPolicy, AdamOptimizer, bc_update

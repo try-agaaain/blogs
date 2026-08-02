@@ -57,7 +57,7 @@ class MLPPolicy:
             value = (h @ self.W2v + self.b2v).squeeze(-1)
         return logits, value, h
 
-    def act(self, x, eps=0.0):
+    def act(self, x, eps=0.0, mask=None):
         """给定状态，返回 (动作, 对数概率, 价值, 概率分布)。
         输入为单行向量时返回 Python 标量，方便直接喂给 env.step。
 
@@ -66,14 +66,29 @@ class MLPPolicy:
         （b(a) = (1-eps)·π(a) + eps/n），这样 PPO 的重要性采样比
         ρ = π_new(a)/b(a) 数学上仍然正确。
         这能防止训练早期策略塌缩成确定性策略（梯度消失、永不突破）。
+
+        mask: (batch, n) 的 0/1 矩阵，把非法动作的概率置零后重归一化。
+        用于安全动作过滤（如哈密顿回路滤波），保证采样永远落在安全集内。
         """
         single = x.ndim == 1 if isinstance(x, np.ndarray) else True
         x = np.atleast_2d(np.asarray(x, dtype=np.float32))
         logits, value, _ = self.forward(x)
         probs = softmax(logits)
+        if mask is not None:
+            mask = np.atleast_2d(np.asarray(mask, dtype=np.float64))
+            probs = probs.astype(np.float64) * mask
+            s = probs.sum(axis=1, keepdims=True)
+            # 全零（首选动作不在安全集）时退化为安全动作上的均匀分布
+            fallback = mask / np.maximum(mask.sum(axis=1, keepdims=True), 1e-12)
+            probs = np.where(s > 1e-12, probs / np.where(s > 0, s, 1.0), fallback)
         if eps and eps > 0:
             # 行为策略 b(a) = (1-eps)·π(a) + eps/n，采样用它
             behavior = (1 - eps) * probs + eps / self.na
+            if mask is not None:
+                behavior = behavior * mask
+                s = behavior.sum(axis=1, keepdims=True)
+                fallback = mask / np.maximum(mask.sum(axis=1, keepdims=True), 1e-12)
+                behavior = np.where(s > 1e-12, behavior / np.where(s > 0, s, 1.0), fallback)
             actions = np.array([np.random.choice(self.na, p=pr) for pr in behavior])
             logp = np.log(np.clip(behavior[np.arange(len(actions)), actions], 1e-12, 1.0))
         else:
@@ -174,7 +189,7 @@ class AdamOptimizer:
 
 def ppo_update(net, optimizer, states, actions, old_logp, advantages, returns,
                clip_eps=0.2, ent_coef=0.01, val_coef=0.5, epochs=10,
-               minibatch=256):
+               minibatch=256, mask=None):
     """
     在收集好的经验上做多轮小批量 PPO 更新。
 
@@ -182,6 +197,9 @@ def ppo_update(net, optimizer, states, actions, old_logp, advantages, returns,
       states/actions/old_logp : 采样时记录的数据
       advantages             : GAE 优势估计（必要时已归一化）
       returns                : 折扣回报（价值网络回归目标）
+      mask                   : (n, na) 动作掩码，与采样时一致。策略更新时
+                              对非法动作 logits 置 -∞，保证 π_new 与采样
+                              时的 masked 行为策略在同一分布上对齐。
 
     返回：
       (policy_loss, value_loss, entropy_loss, clip_fraction, approx_kl)
@@ -195,7 +213,8 @@ def ppo_update(net, optimizer, states, actions, old_logp, advantages, returns,
             stats = _compute_update(net, optimizer,
                                     states[idx], actions[idx], old_logp[idx],
                                     advantages[idx], returns[idx],
-                                    clip_eps, ent_coef, val_coef)
+                                    clip_eps, ent_coef, val_coef,
+                                    mask=mask[idx] if mask is not None else None)
             pol_losses.append(stats[1]); val_losses.append(stats[2])
             ent_losses.append(stats[3]); clip_fracs.append(stats[4])
             kl_acc += stats[5]
@@ -205,7 +224,7 @@ def ppo_update(net, optimizer, states, actions, old_logp, advantages, returns,
 
 
 def _compute_update(net, opt, S, A, old_logp, adv, ret,
-                    clip_eps, ent_coef, val_coef):
+                    clip_eps, ent_coef, val_coef, mask=None):
     """单个小批量的前向 + 手写反向传播 + 参数更新。返回统计量。"""
     B = len(S)
 
@@ -217,6 +236,9 @@ def _compute_update(net, opt, S, A, old_logp, adv, ret,
         value = (hv @ net.W2v + net.b2v).squeeze(-1)       # (B,)
     else:
         value = (h @ net.W2v + net.b2v).squeeze(-1)        # (B,)
+    if mask is not None:
+        # invalid-action masking：非法动作 logits 置 -∞，softmax 自然归一化
+        logits = logits - 1e9 * (1.0 - mask)
     probs = softmax(logits)                                # (B, na)
     logp = np.log(np.clip(probs[np.arange(B), A], 1e-12, 1.0))
 

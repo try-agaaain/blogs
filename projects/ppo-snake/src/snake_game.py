@@ -40,8 +40,12 @@ REWARD_HIT_WALL = -5.0
 REWARD_HIT_BODY = -5.0          # 与原版一致，避免过重惩罚破坏探索
 REWARD_STEP = -0.02
 SHAPING_FOOD_COEF = 1.5         # 靠近食物 shaping（与原版一致）
-SHAPING_REACH_COEF = 0.02       # 可达空间 shaping
-SHAPING_REACH_MIN_LEN = 6       # 蛇长达到此值后才启用可达空间 shaping
+SHAPING_REACH_COEF = 0.08       # 可达空间 shaping（长蛇存活关键）
+SHAPING_REACH_MIN_LEN = 4       # 蛇长达到此值后才启用可达空间 shaping
+REWARD_OPEN = 0.05              # 开阔奖励：蛇头可达空间占比越高越好
+SPLIT_MIN_LEN = 8               # 蛇长达到此值后启用割裂惩罚
+SPLIT_FRAC = 0.35               # 可达区占比低于此值视为"被困口袋"
+SPLIT_PENALTY = 0.5             # 被困口袋的每步惩罚
 
 # 绝对方向 -> 坐标增量
 DIR_VEC = {
@@ -64,11 +68,12 @@ DIR_INDEX = {"up": 0, "down": 1, "left": 2, "right": 3}
 class SnakeEnv:
     """贪吃蛇环境，实现最小化 gym 风格接口：reset / step / render_text。"""
 
-    def __init__(self, width=WIDTH, height=HEIGHT, seed=None):
+    def __init__(self, width=WIDTH, height=HEIGHT, seed=None, step_limit=None):
         self.width = width
         self.height = height
         self.max_cells = width * height
         self.rng = random.Random(seed)
+        self._step_limit_override = step_limit   # 课程学习用：None = 用默认公式
         self.snake = []          # [(x, y), ...] 头部在前
         self.direction = "right"
         self.food = None
@@ -101,6 +106,8 @@ class SnakeEnv:
 
     def _step_limit(self):
         # 随蛇变长放宽步数上限，但总有限制（防止无限绕圈）
+        if self._step_limit_override is not None:
+            return self._step_limit_override
         return 200 + 50 * len(self.snake)
 
     # ---------------------------------------------------------- 核心状态
@@ -133,7 +140,11 @@ class SnakeEnv:
         left = TURN[self.direction][1]
         right = TURN[self.direction][2]
 
-        fx, fy = self.food
+        if self.food is None:
+            # 通关状态（地图被占满）：用"远离蛇头"的占位食物，避免崩溃
+            fx = fy = -1
+        else:
+            fx, fy = self.food
         food_rel = [0.0, 0.0, 0.0, 0.0]   # [straight, left, right, back]
 
         def is_ahead(d):
@@ -261,6 +272,10 @@ class SnakeEnv:
             self._place_food()
             # 吃到食物后蛇变长、食物换位，重新校准可达空间基准
             self._last_reach = self._reachable_free()
+            if self.food is None:
+                # 地图被蛇占满（143 格）＝通关：胜利结束
+                self.done = True
+                reward = REWARD_EAT + 50.0
         else:
             # 每步小惩罚，催促尽快吃到食物
             reward = REWARD_STEP
@@ -275,6 +290,19 @@ class SnakeEnv:
                 reach = self._reachable_free()
                 reward += SHAPING_REACH_COEF * (reach - self._last_reach)
                 self._last_reach = reach
+                # 开阔奖励：蛇头可达空间占比越高越好（直接教"待在开阔区"，
+                # 避免钻进身体围成的口袋）。长蛇期这是活到高身长的关键信号。
+                total_free = self.max_cells - len(self.snake)
+                if total_free > 0:
+                    reach_frac = reach / total_free
+                    reward += REWARD_OPEN * reach_frac
+                    # 割裂惩罚：蛇头被困在不足 SPLIT_FRAC 比例的空间里
+                    # （口袋里可能还有几格，差分 shaping 看不出来），
+                    # 用绝对占比即时惩罚"钻死胡同"。
+                    if len(self.snake) >= SPLIT_MIN_LEN \
+                            and reach_frac < SPLIT_FRAC:
+                        reward -= SPLIT_PENALTY \
+                            * (SPLIT_FRAC - reach_frac) / SPLIT_FRAC
             else:
                 self._last_reach = self._reachable_free()
 

@@ -1,0 +1,1147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PPO 大语言模型版 · RLHF 视角下的近端策略优化</title>
+<script>
+window.MathJax = {
+  tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] },
+  svg: { fontCache: 'global' }
+};
+</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+<style>
+:root {
+  --bg: #f6f7fb;
+  --panel: #ffffff;
+  --ink: #1b2330;
+  --ink-2: #56617a;
+  --line: #e4e8f0;
+  --primary: #4f46e5;
+  --primary-2: #7c3aed;
+  --accent: #06b6d4;
+  --green: #10b981;
+  --amber: #f59e0b;
+  --rose: #f43f5e;
+  --radius: 16px;
+  --shadow: 0 1px 2px rgba(27,35,48,.06), 0 8px 24px rgba(27,35,48,.06);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 90px; }
+body {
+  font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.75; font-size: 15px;
+}
+::selection { background: rgba(79,70,229,.18); }
+
+.hero {
+  position: relative; padding: 56px 40px 40px;
+  background:
+    radial-gradient(900px 340px at 15% -10%, rgba(124,58,237,.22), transparent 60%),
+    radial-gradient(800px 300px at 90% 0%, rgba(6,182,212,.16), transparent 60%),
+    linear-gradient(135deg, #141a2e 0%, #1b2336 60%, #232a45 100%);
+  color: #f4f6ff;
+}
+.hero .wrap { max-width: 1060px; margin: 0 auto; }
+.hero .tag {
+  display: inline-block; font-size: 12px; letter-spacing: .12em; padding: 4px 12px;
+  border-radius: 999px; background: rgba(255,255,255,.10);
+  border: 1px solid rgba(255,255,255,.18); color: #c9d4ff; margin-bottom: 16px;
+}
+.hero h1 { font-size: 32px; font-weight: 800; letter-spacing: .5px; line-height: 1.3; }
+.hero h1 .grad {
+  background: linear-gradient(90deg, #93c5fd, #c4b5fd, #67e8f9);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.hero p.sub { margin-top: 14px; color: #b9c2e0; max-width: 800px; font-size: 15px; }
+.hero .meta { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 10px; }
+.hero .chip {
+  font-size: 12px; color: #dfe6ff; background: rgba(255,255,255,.08);
+  border: 1px solid rgba(255,255,255,.14); padding: 4px 12px; border-radius: 999px;
+}
+
+.layout { max-width: 1280px; margin: 0 auto; display: flex; gap: 28px; padding: 0 24px; }
+.sidebar {
+  width: 264px; flex-shrink: 0; position: sticky; top: 0; align-self: flex-start;
+  height: 100vh; overflow-y: auto; padding: 24px 8px 24px 0;
+}
+.sidebar .toc-title { font-size: 12px; letter-spacing: .1em; color: var(--ink-2); font-weight: 700; margin: 8px 0 10px; padding-left: 12px; }
+.sidebar a {
+  display: block; padding: 7px 12px; border-radius: 10px; color: var(--ink-2);
+  text-decoration: none; font-size: 13.5px; border-left: 3px solid transparent; transition: all .18s ease;
+}
+.sidebar a:hover { background: #edf0fa; color: var(--ink); }
+.sidebar a.active {
+  background: linear-gradient(90deg, rgba(79,70,229,.12), rgba(79,70,229,.03));
+  color: var(--primary); border-left-color: var(--primary); font-weight: 600;
+}
+main { flex: 1; min-width: 0; max-width: 880px; padding: 28px 0 90px; }
+
+.panel {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 28px 30px; margin-bottom: 22px;
+}
+h2 { font-size: 22px; font-weight: 800; display: flex; align-items: center; gap: 10px; margin-bottom: 18px; letter-spacing: .3px; }
+h2 .no {
+  font-size: 13px; font-weight: 800; color: #fff;
+  background: linear-gradient(135deg, var(--primary), var(--primary-2));
+  width: 28px; height: 28px; border-radius: 9px;
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+h3 { font-size: 16.5px; font-weight: 700; margin: 26px 0 10px; display: flex; align-items: center; gap: 8px; }
+h3 .dot { width: 8px; height: 8px; border-radius: 50%; background: linear-gradient(135deg, var(--primary), var(--primary-2)); flex-shrink: 0; }
+p { color: var(--ink); margin: 10px 0; }
+.muted { color: var(--ink-2); }
+b, strong { color: #141b2d; }
+
+.formula {
+  background: linear-gradient(180deg, #f8f7ff, #f3f1ff); border: 1px solid #e2dcff;
+  border-left: 4px solid var(--primary); border-radius: 12px; padding: 16px 20px; margin: 14px 0; overflow-x: auto;
+}
+.formula .label { font-size: 12px; color: var(--primary); font-weight: 700; letter-spacing: .06em; margin-bottom: 6px; }
+.formula.dark { background: linear-gradient(135deg, #141a2e, #262f52); border-color: #3d4a7a; border-left-color: #7c8cf5; }
+.formula.dark .label { color: #93c5fd; }
+.formula.dark .txt { color: #e8ecff; font-size: 16px; font-weight: 600; line-height: 1.9; }
+
+.note { border-radius: 12px; padding: 14px 18px; margin: 14px 0; font-size: 14px; border: 1px solid; }
+.note.info { background: #eef6ff; border-color: #cfe4fb; color: #15529c; }
+.note.warn { background: #fff7ec; border-color: #fadcae; color: #92500b; }
+.note.key { background: #f1fdf7; border-color: #bfead6; color: #0e7a4d; }
+.note .t { font-weight: 700; margin-right: 6px; }
+
+ul.clean { margin: 8px 0 8px 4px; list-style: none; }
+ul.clean li { position: relative; padding-left: 22px; margin: 7px 0; }
+ul.clean li::before {
+  content: ""; position: absolute; left: 4px; top: 10px; width: 7px; height: 7px;
+  border-radius: 2px; background: linear-gradient(135deg, var(--primary), var(--primary-2)); transform: rotate(45deg);
+}
+
+.term-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin: 14px 0; }
+.term { border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 12px; padding: 12px 16px; background: #fff; }
+.term .t { font-weight: 700; font-size: 14px; color: #0e7490; }
+.term .d { font-size: 12.5px; color: var(--ink-2); margin-top: 4px; line-height: 1.6; }
+
+.tbl-wrap { overflow-x: auto; margin: 16px 0; border-radius: 12px; border: 1px solid var(--line); }
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; min-width: 640px; }
+thead th {
+  background: linear-gradient(135deg, #1d2440, #262f52); color: #e8ecff;
+  padding: 12px 14px; text-align: left; font-weight: 700; white-space: nowrap;
+}
+tbody td { padding: 11px 14px; border-top: 1px solid var(--line); vertical-align: top; color: var(--ink); }
+tbody tr:nth-child(even) { background: #f8f9fd; }
+tbody tr:hover { background: #eef1fd; }
+td.row-name { font-weight: 700; color: #2c3350; white-space: nowrap; }
+.check { color: var(--green); font-weight: 800; }
+.cross { color: var(--rose); font-weight: 800; }
+
+/* 数据流 */
+.flow { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.fnode {
+  border-radius: 12px; padding: 12px 14px; text-align: center; min-width: 108px; flex: 1;
+  background: #fff; border: 2px solid var(--line); position: relative;
+}
+.fnode .n { font-weight: 800; font-size: 14px; }
+.fnode .d { font-size: 11.5px; color: var(--ink-2); margin-top: 4px; line-height: 1.5; }
+.fnode.c1 { border-color: #c7d2fe; } .fnode.c1 .n { color: #4338ca; }
+.fnode.c2 { border-color: #a5f3fc; } .fnode.c2 .n { color: #0e7490; }
+.fnode.c3 { border-color: #a7f3d0; } .fnode.c3 .n { color: #047857; }
+.fnode.c4 { border-color: #fde68a; } .fnode.c4 .n { color: #b45309; }
+.fnode.hot { border-color: #fbcfe8; box-shadow: 0 0 0 2px rgba(244,114,182,.2); }
+.fnode.hot .n { color: #be185d; }
+.farrow { font-size: 20px; color: #a3aec6; font-weight: 700; flex-shrink: 0; }
+.flow-note { font-size: 12px; color: var(--ink-2); text-align: center; margin: 4px 0 16px; }
+
+/* 控件 */
+.ctrl {
+  display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin: 14px 0;
+  padding: 12px 16px; border: 1px solid var(--line); border-radius: 12px; background: #fbfcff;
+}
+.btn {
+  border: 1px solid var(--line); background: #fff; padding: 7px 14px; border-radius: 999px;
+  font-size: 13px; font-weight: 600; color: var(--ink-2); cursor: pointer; transition: all .18s ease;
+}
+.btn:hover { border-color: var(--primary); color: var(--primary); }
+.btn.active {
+  background: linear-gradient(135deg, var(--primary), var(--primary-2)); color: #fff; border-color: transparent;
+  box-shadow: 0 6px 16px rgba(79,70,229,.30);
+}
+.btn.warn-active { background: linear-gradient(135deg, #f43f5e, #fb7185); color: #fff; border-color: transparent; }
+.slider-group { display: flex; align-items: center; gap: 10px; }
+.slider-group label { font-size: 13px; color: var(--ink-2); font-weight: 600; white-space: nowrap; }
+.slider-group input[type=range] { width: 130px; accent-color: var(--primary); }
+.slider-val {
+  font-size: 12.5px; font-weight: 800; color: var(--primary);
+  background: #eceafd; border-radius: 8px; padding: 2px 9px; min-width: 44px; text-align: center;
+}
+
+canvas { width: 100%; height: 340px; display: block; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+canvas.short { height: 240px; }
+.chart-cap { font-size: 12.5px; color: var(--ink-2); margin-top: 6px; text-align: center; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 10px 0; font-size: 12.5px; color: var(--ink-2); }
+.legend .item { display: inline-flex; align-items: center; gap: 6px; }
+.legend .sw { width: 18px; height: 4px; border-radius: 2px; display: inline-block; }
+.legend .sw.dot { width: 10px; height: 10px; border-radius: 50%; }
+
+/* 循环动画 */
+.loop-wrap { margin: 16px 0; }
+.loop-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.loop-step {
+  border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: #fff;
+  transition: all .25s ease; opacity: .45;
+}
+.loop-step .step-idx { font-size: 11px; font-weight: 800; color: #fff; background: #94a3b8; border-radius: 7px; padding: 1px 8px; }
+.loop-step .step-name { font-weight: 700; font-size: 14px; margin-top: 6px; }
+.loop-step .step-desc { font-size: 12.5px; color: var(--ink-2); margin-top: 4px; }
+.loop-step.active { opacity: 1; border-color: var(--primary); box-shadow: 0 0 0 2px rgba(79,70,229,.18); }
+.loop-step.active .step-idx { background: linear-gradient(135deg, var(--primary), var(--primary-2)); }
+
+/* 采样回答 */
+.samples { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin: 12px 0; }
+.sample {
+  border-radius: 10px; padding: 8px 10px; background: #fff; border: 1px solid var(--line);
+  font-size: 12.5px; text-align: center;
+}
+.sample .toks { font-weight: 800; font-size: 14px; }
+.sample .rm { font-size: 11px; color: var(--ink-2); margin-top: 2px; }
+.sample.good { border-color: #a7f3d0; background: #f0fdf6; }
+.sample.bad { border-color: #fecdd3; background: #fff1f2; }
+.sample .clip-mark { color: var(--amber); font-weight: 800; }
+
+/* 分布对比条 */
+.dist-card { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin: 10px 0; background: #fff; }
+.dist-card .dc-head { font-size: 13px; font-weight: 800; color: #2c3350; margin-bottom: 6px; }
+.drow { display: flex; align-items: center; gap: 8px; margin: 3px 0; font-size: 12px; }
+.drow .w { width: 30px; text-align: right; font-weight: 700; color: var(--ink-2); flex-shrink: 0; }
+.drow .w.hi { color: var(--green); }
+.dtrack { position: relative; flex: 1; height: 14px; border-radius: 7px; }
+.dtrack .ref-bar { position: absolute; left: 0; top: 1px; height: 12px; border-radius: 6px; border: 1.5px dashed #94a3b8; background: rgba(148,163,184,.12); }
+.dtrack .act-bar { position: absolute; left: 0; top: 0; height: 14px; border-radius: 7px; background: linear-gradient(90deg, #818cf8, #6366f1); transition: width .25s ease; }
+.drow .p { width: 96px; color: var(--ink-2); font-variant-numeric: tabular-nums; font-size: 11px; flex-shrink: 0; }
+
+/* demo 信息 */
+.demo-info { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin: 12px 0; }
+.di { border-radius: 12px; padding: 10px 12px; background: #fff; border: 1px solid var(--line); text-align: center; }
+.di .k { font-size: 11.5px; color: var(--ink-2); font-weight: 700; }
+.di .v { font-size: 18px; font-weight: 800; margin-top: 2px; font-variant-numeric: tabular-nums; }
+
+.end-note { text-align: center; color: var(--ink-2); font-size: 13px; padding: 26px 0 10px; }
+
+@media (max-width: 980px) {
+  .sidebar { display: none; }
+  .hero { padding: 40px 24px; }
+  .hero h1 { font-size: 25px; }
+  .layout { padding: 0 16px; }
+  .panel { padding: 22px 20px; }
+  .loop-grid { grid-template-columns: 1fr; }
+  .flow { flex-direction: column; }
+  .farrow { transform: rotate(90deg); }
+}
+</style>
+</head>
+<body>
+
+<!-- ================= Hero ================= -->
+<header class="hero">
+  <div class="wrap">
+    <span class="tag">强化学习 · 图解笔记 · 第 4 篇 · LLM 专版</span>
+    <h1><span class="grad">PPO</span> 大语言模型版：给"下一个词"做强化学习</h1>
+    <p class="sub">上一版讲的是通用 PPO，演示像"游戏"——这次把场景换成大语言模型：动作是"选一个词"、奖励在句尾才出现、还要时刻用 Reference 模型拽住它别"说胡话"。公式不变，但"味道"完全不同。</p>
+    <div class="meta">
+      <span class="chip">RLHF</span>
+      <span class="chip">四模型架构</span>
+      <span class="chip">Per-token 奖励</span>
+      <span class="chip">KL 惩罚</span>
+      <span class="chip">奖励回溯</span>
+    </div>
+  </div>
+</header>
+
+<div class="layout">
+  <nav class="sidebar">
+    <div class="toc-title">目录</div>
+    <a href="#s1">01 · 游戏 PPO vs LLM PPO</a>
+    <a href="#s2">02 · 把"生成"建模成强化学习</a>
+    <a href="#s3">03 · 四模型生产线</a>
+    <a href="#s4">04 · Rollout：给 prompt 采样</a>
+    <a href="#s5">05 · 奖励设计：句尾 RM + 逐词 KL</a>
+    <a href="#s6">06 · 句尾奖励如何"回溯"到每个词</a>
+    <a href="#s7">07 · Clip 在 LLM 里长什么样</a>
+    <a href="#s8">08 · 训练循环动画</a>
+    <a href="#s9">09 · 交互演示：字符级 LLM 学 PPO</a>
+    <a href="#s10">10 · 工程实践与超参</a>
+    <a href="#s11">11 · LLM 特有误区</a>
+    <a href="#s12">12 · 一张图记住</a>
+  </nav>
+
+  <main>
+
+    <!-- ============ 01 对比 ============ -->
+    <section id="s1">
+      <div class="panel">
+        <h2><span class="no">01</span>游戏 PPO vs LLM PPO：差在哪里</h2>
+        <p>先说结论：<b>PPO 的目标函数一字不改</b>——优势、重要性采样、clip 在两种场景里完全一样。变的是你喂给它的"世界"：状态、动作、奖励完全不同，导致 LLM 版 PPO 有了截然不同的工程形态。</p>
+
+        <div class="tbl-wrap">
+          <table>
+            <thead>
+              <tr><th>维度</th><th>游戏 / 机器人</th><th>大语言模型（RLHF）</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="row-name">状态 \(s\)</td>
+                <td>游戏画面 / 传感器读数</td>
+                <td>已生成的 token 序列（prompt + 前面的词）</td>
+              </tr>
+              <tr>
+                <td class="row-name">动作 \(a\)</td>
+                <td>摇杆、按键、关节力矩（连续或少量离散）</td>
+                <td>从词表选 1 个词（几万个离散选项）</td>
+              </tr>
+              <tr>
+                <td class="row-name">奖励信号</td>
+                <td>密集——每帧都有奖励</td>
+                <td>稀疏——通常只在整段回答结束时给一次</td>
+              </tr>
+              <tr>
+                <td class="row-name">采样成本</td>
+                <td>低，模拟器跑得飞快</td>
+                <td>极高，得真的跑一遍 LLM 生成</td>
+              </tr>
+              <tr>
+                <td class="row-name">价值网络 Critic</td>
+                <td>需要，能训好</td>
+                <td>需要，但很难训稳（梯度噪声大）——所以 GRPO 想干掉它</td>
+              </tr>
+              <tr>
+                <td class="row-name">防"跑偏"手段</td>
+                <td>clip 限幅基本够用</td>
+                <td>clip + KL 双重保险（防"说高分胡话"）</td>
+              </tr>
+              <tr>
+                <td class="row-name">一个 epoch 的代价</td>
+                <td>几分钟</td>
+                <td>四个模型常驻显存，按 GPU 小时计</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="formula dark">
+          <div class="label">LLM 版 PPO 的一句话心智模型</div>
+          <div class="txt">
+            给每一段生成请一个"裁判"（RM）打分，但裁判只在整段回答结束时亮分——所以必须把句尾的分<b style="color:#67e8f9">回溯到每个词</b>，并时刻提醒模型<b style="color:#fda4af">"别偏离 SFT 基线说出离谱的话"（KL）</b>，再用 <b style="color:#a7f3d0">clip</b> 控制每次更新步子别迈太大。
+          </div>
+        </div>
+
+        <div class="note key">
+          <span class="t">一句话：</span>PPO 是通用的"更新引擎"，LLM 版换的是<strong>输入燃料</strong>——token 序列当状态、词表当动作空间、RM+KL 当奖励、四模型当生产线。
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 02 MDP 建模 ============ -->
+    <section id="s2">
+      <div class="panel">
+        <h2><span class="no">02</span>把"生成一句话"建模成强化学习</h2>
+        <p>语言模型本来就是逐词生成的自回归过程，把它翻译成 RL 的 MDP 语言非常自然——每一处都有明确的对应：</p>
+
+        <div class="term-grid">
+          <div class="term"><div class="t">状态 \(s_t\)</div><div class="d">prompt + 已经生成的 token 序列。如 "写首诗 + 天空 飘 着"。</div></div>
+          <div class="term"><div class="t">动作 \(a_t\)</div><div class="d">选择下一个 token。动作空间 = 整个词表（几万个"按键"）。</div></div>
+          <div class="term"><div class="t">策略 \(\pi_\theta(a\mid s)\)</div><div class="d">LLM 本体：给定当前序列，输出下一个词的概率分布。</div></div>
+          <div class="term"><div class="t">轨迹 \(\tau\)</div><div class="d">一整段回答。策略玩一局 = 生成一句完整的话。</div></div>
+          <div class="term"><div class="t">奖励 \(r_t\)</div><div class="d">句尾的 RM 分数 + 每一步的 KL 惩罚（见第 05 节）。</div></div>
+          <div class="term"><div class="t">价值 \(V(s)\)</div><div class="d">Critic 预测"当前这句话最终能拿多少分"——当"及格线"。</div></div>
+        </div>
+
+        <h3><span class="dot"></span>关键差异：这个"游戏"每局要跑很久才给分</h3>
+        <p>游戏里每按一下按键、每走一步都有即时奖励；但 LLM 里，RM 只能评估<strong>完整的回答</strong>——不可能在生成到一半时就给"这句话好不好"打分。于是整个回答过程中所有 token 的"好坏"都得靠<strong>推算</strong>：句尾分数 + 价值网络的预测 + 下一步的实际回报，这就是后面 GAE 要做的事（第 06 节）。</p>
+
+        <div class="note warn">
+          <span class="t">另一个巨大的差别：</span>LLM 的动作空间（词表）有数万个选项，而且一个动作"选错词"的影响会沿序列累积——一个平庸的词可能毁掉整段回答。这让 LLM 的 RL 天然比游戏难：<b>奖励稀疏 × 动作空间巨大 × 长程依赖</b>，三者叠加，这就是为什么 RLHF 需要精心设计的奖励和多重稳定手段。
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 03 四模型 ============ -->
+    <section id="s3">
+      <div class="panel">
+        <h2><span class="no">03</span>四模型生产线：RLHF 的"工厂"</h2>
+        <p>LLM 版 PPO 之所以"贵"，是因为训练时同时挂着 <b>4 个模型</b>。数据从左边流进，先"提问-作答"，再"打分-纠偏"，最后由 PPO 更新主角：</p>
+
+        <div class="flow">
+          <div class="fnode c1"><div class="n">Prompt</div><div class="d">一批用户指令</div></div>
+          <div class="farrow">→</div>
+          <div class="fnode c2 hot"><div class="n">Actor 策略</div><div class="d">唯一被训练者 · 生成回答</div></div>
+          <div class="farrow">→</div>
+          <div class="fnode c3"><div class="n">RM 奖励模型</div><div class="d">冻结 · 句尾打分</div></div>
+          <div class="farrow">＋</div>
+          <div class="fnode c4"><div class="n">Reference 参考</div><div class="d">冻结 · 逐词算 KL 惩罚</div></div>
+          <div class="farrow">→</div>
+          <div class="fnode c2"><div class="n">Critic 价值</div><div class="d">随训 · 提供基线</div></div>
+          <div class="farrow">→</div>
+          <div class="fnode c3"><div class="n">PPO 更新</div><div class="d">clip 目标 · 更新 Actor &amp; Critic</div></div>
+        </div>
+        <div class="flow-note">RM 与 Reference 全程冻结，只有 Actor 和 Critic 会被更新</div>
+
+        <div class="term-grid">
+          <div class="term"><div class="t">Actor（策略模型）</div><div class="d">主角，也就是被微调的 LLM。生成回答，并按 PPO 目标更新参数，朝"高分 + 不离谱"进化。</div></div>
+          <div class="term"><div class="t">Reference（参考模型）</div><div class="d">RL 开始前冻结的 SFT 模型。逐词计算 KL 惩罚，防止策略为拿高分而"说胡话"。</div></div>
+          <div class="term"><div class="t">RM（奖励模型）</div><div class="d">训练好的打分器，冻结不动。只负责在句尾给整段回答一个标量分。</div></div>
+          <div class="term"><div class="t">Critic（价值网络）</div><div class="d">与 Actor 一起训练，估计 \(V(s)\)，为 GAE 提供"平均表现"基线。</div></div>
+        </div>
+
+        <div class="note info">
+          <span class="t">为什么是 4 个而不是 3 个？</span>Reference 承担的是"语言质量的锚"：奖励模型只管"好不好"，但不管"像不像人话"。KL 惩罚让策略永远不能偏离 SFT 基线太远，从源头上堵死"高分乱码"。这也是 LLM 版 PPO 与游戏版最显著的差异——<b>游戏里没有"参考策略"这一说</b>。
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 04 Rollout ============ -->
+    <section id="s4">
+      <div class="panel">
+        <h2><span class="no">04</span>Rollout：给一个 prompt 采样一批回答</h2>
+        <p>RL 训练的第一阶段叫 <b>rollout（采样）</b>：对每个 prompt，用当前的 Actor 生成 \(N\) 个完整回答，同时<b>记录每个 token 的生成概率</b>——这些概率记录非常重要，它是之后计算重要性比率 \(\rho\) 的唯一凭据。</p>
+
+        <div class="formula">
+          <div class="label">采样时记录的关键数据（每个回答、每个 token）</div>
+          \[
+          \text{回答}_j = (a_{j,1}, a_{j,2}, \dots, a_{j,T}), \qquad
+          \pi_{\theta_{\text{old}}}(a_{j,t} \mid s_{j,t}) \ \text{（每步选词概率）},\qquad
+          R_j = r_{\text{RM}}(x, y_j) \ \text{（句尾总分）}
+          \]
+        </div>
+
+        <h3><span class="dot"></span>为什么采样要"花大钱"</h3>
+        <ul class="clean">
+          <li>每个回答都要真的跑一遍 LLM 前向，几百上千条 prompt × 每 prompt 采 \(N\) 个回答，一毫一厘都是算力。</li>
+          <li>所以 PPO 用<strong>旧的采样数据反复更新多次</strong>（多 epoch），最大化利用——前提是有 clip 守住（见第 07 节）。</li>
+          <li>采样温度、top-p 会改变动作分布，也改变 \(\rho\) 的含义——通常训练时用固定温度采样。</li>
+        </ul>
+
+        <div class="note info">
+          <span class="t">同一个 prompt 采样多次的意义：</span>同一个问题，模型可以答得千差万别。采样多次才能拿到"同一状态下不同动作的对比"，组内差异越大，PPO 学到的信号越丰富——这也为 GRPO"用组内相对分数当优势"埋下了伏笔。
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 05 奖励设计 ============ -->
+    <section id="s5">
+      <div class="panel">
+        <h2><span class="no">05</span>奖励设计：句尾 RM + 逐词 KL 惩罚</h2>
+        <p>LLM 的奖励是"总分 + 扣分"的组合：<b>RM 只在句尾给一个总分</b>（回答好坏），<b>KL 惩罚逐词实时扣分</b>（每选一个"偏离 SFT 基线"的词都要付出代价）。两者相加才是每个 token 的真正奖励：</p>
+
+        <div class="formula">
+          <div class="label">Per-token 奖励（句尾 RM + 逐词 KL 惩罚）</div>
+          \[
+          r_t = \underbrace{r_{\text{RM}}(x, y) \cdot \mathbf{1}[t = T]}_{\text{句尾总奖励（只在最后一步给）}} \;+\; \beta \cdot \underbrace{\Big( \log \pi_{\text{ref}}(y_t) - \log \pi_\theta(y_t) \Big)}_{\text{逐词 KL 惩罚}}
+          \]
+          <div style="font-size:12.5px;color:#56617a;margin-top:6px">当 Actor 给某个词的概率超过 Reference，\(\log \pi_{\text{ref}} - \log \pi_\theta &lt; 0\) → 扣分。模型越"放飞"，扣得越狠。</div>
+        </div>
+
+        <h3><span class="dot"></span>为什么必须配 KL：奖励黑客（Reward Hacking）</h3>
+        <p>如果只优化 RM 分数，模型会学出一堆"哄骗 RM 的话术"——这正是 RLHF 最著名的坑：</p>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th>RM 的偏好（可能）</th><th>模型学会的行为</th><th>后果</th></tr></thead>
+            <tbody>
+              <tr><td class="row-name">喜欢"长一点"的回答</td><td>疯狂注水、重复废话</td><td>回答冗长无意义</td></tr>
+              <tr><td class="row-name">喜欢奉承的语气</td><td>无脑顺从、不懂拒绝</td><td>有害请求也不拒绝</td></tr>
+              <tr><td class="row-name">喜欢某些风格词</td><td>堆砌特定词汇</td><td>生硬、不自然</td></tr>
+              <tr><td class="row-name">（极端）分数函数有漏洞</td><td>输出乱码骗高分</td><td>完全崩坏</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="note key">
+          <span class="t">KL 惩罚的职责：</span>它像一条"语言质量安全带"——<b>你在正常语言范围内追求高分可以，但想靠说胡话/注水/奉承刷分，每走一步就扣一分</b>。\( \beta \) 越大，模型越保守，越贴着 SFT 基线走。
+        </div>
+
+        <h3><span class="dot"></span>数学直觉：KL 惩罚 ≈ 隐式的策略熵约束</h3>
+        <p>有趣的是，把 KL 惩罚项合并进 PPO 目标后，它可以被重写成"带约束的最大化奖励"：</p>
+        <div class="formula">
+          <div class="label">等价视角：KL 惩罚 = 软性的"别走太远"约束</div>
+          \[
+          \max_{\pi_\theta} \ \mathbb{E}[r_{\text{RM}}] \;-\; \beta \cdot \mathrm{KL}\big(\pi_\theta \,\|\, \pi_{\text{ref}}\big)
+          \qquad\Longleftrightarrow\qquad
+          \max_{\pi_\theta} \ \mathbb{E}[r_{\text{RM}}] \quad \text{s.t.}\quad \mathrm{KL}(\pi_\theta \|\pi_{\text{ref}}) \le \delta
+          \]
+        </div>
+        <p class="muted">约束 \(\delta\) 由 \(\beta\) 隐式决定。所以 PPO 在 LLM 里天然是"最大化奖励 + 紧贴参考"的双目标问题。</p>
+      </div>
+    </section>
+
+    <!-- ============ 06 回溯 ============ -->
+    <section id="s6">
+      <div class="panel">
+        <h2><span class="no">06</span>句尾奖励如何"回溯"到每个词（GAE）</h2>
+        <p>RM 只在句尾打分，可我们训练时需要对<strong>每一个 token</strong>都给出"这一步好不好"的信号。怎么把句尾的总分分摊回前面的词？这就轮到 GAE（泛化优势估计）了。</p>
+
+        <p>核心直觉：<b>前面的词对后面的表现负有"因果责任"</b>——第 3 个词选得好，第 4 个词才有的发挥。所以句尾的高分应该"沿着时间轴往回看"，逐步传导到前面每个词，只是越远的词分到的权重越小。</p>
+
+        <div class="formula">
+          <div class="label">GAE：把一串 TD 误差按 \((\gamma\lambda)^l\) 加权求和（LLM 通常取 \(\gamma = 1\)，即不打折）</div>
+          \[
+          \hat{A}_t^{\text{GAE}} = \delta_t + (\gamma\lambda)\,\delta_{t+1} + (\gamma\lambda)^2\,\delta_{t+2} + \cdots,
+          \qquad \delta_t = r_t + \gamma V(s_{t+1}) - V(s_t)
+          \]
+          <div style="font-size:12.5px;color:#56617a;margin-top:6px">\(\delta_t\)（TD 误差）衡量"这一步的实际回报 − 预期回报"；\(V\) 由 Critic 提供。\(\lambda\) 决定"看多远"。</div>
+        </div>
+
+        <h3><span class="dot"></span>一个具体例子：回答「天气晴好」</h3>
+        <p>假设 RM 给整句打了 <b>+1 分</b>，句子有 4 个 token。\(\gamma=1, \lambda=0.95\) 时，句尾那 +1 分并不会只记在最后一个词头上——它通过 \(\delta_t\) 的链式传递，<b>让前面的词（"天""气""晴"）也拿到大部分功劳</b>，因为正是它们铺平了"好结尾"的道路。这就是"奖励回溯"。</p>
+
+        <h3><span class="dot"></span>交互图：拖 \(\lambda\)，看句尾奖励怎么"往回流"</h3>
+        <p>柱状图显示"未来第 \(l\) 步的 TD 误差"在优势估计里的权重 \((\gamma\lambda)^l\)。\(\lambda=1\) 时句尾奖励全额回溯到开头；\(\lambda=0\) 时只有眼前一步能拿到信息：</p>
+        <div class="ctrl">
+          <div class="slider-group">
+            <label>GAE 参数 λ</label>
+            <input type="range" id="gaeLam" min="0" max="1" step="0.01" value="0.95">
+            <span class="slider-val" id="gaeLamVal">0.95</span>
+          </div>
+          <span class="muted" style="font-size:13px">\(\gamma=1\)（LLM 场景常见取值，不打折）</span>
+        </div>
+        <canvas id="gaeChart" class="short" height="240"></canvas>
+        <div class="chart-cap">横轴 = 从当前位置往未来数第 l 步 · 权重越大 = 句尾分数越能"传"到前面的词</div>
+
+        <div class="note warn">
+          <span class="t">为什么 LLM 里 \(\gamma\) 常取 1？</span>游戏里越久远的奖励越不值钱（打折），但 LLM 的一个回答只有几百个 token，句尾的好坏对整段都重要，所以"不打折"。这也是"句尾奖励回溯"能成立的前提。
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 07 Clip ============ -->
+    <section id="s7">
+      <div class="panel">
+        <h2><span class="no">07</span>Clip 在 LLM 里长什么样</h2>
+        <p>有了逐 token 的优势，就可以做 PPO 更新了。clip 针对的是<strong>每一个 token 的概率比</strong>：</p>
+
+        <div class="formula">
+          <div class="label">LLM 版 PPO-Clip 目标（逐 token）</div>
+          \[
+          \mathcal{L}^{\text{CLIP}} = \mathbb{E}_t \Big[ \min\!\big(\rho_t \hat{A}_t,\; \operatorname{clip}(\rho_t, 1-\varepsilon, 1+\varepsilon)\,\hat{A}_t\big) \Big], \qquad
+          \rho_t = \frac{\pi_\theta(y_t\mid s_t)}{\pi_{\theta_{\text{old}}}(y_t\mid s_t)}
+          \]
+          <div style="font-size:12.5px;color:#56617a;margin-top:6px">\(\rho_t\) 是"当前策略 vs 采样时策略"对同一个词 \(y_t\) 的概率比。旧数据复用多个 epoch 时，\(\rho_t\) 会越走越偏，clip 就负责把它们摁住。</div>
+        </div>
+
+        <h3><span class="dot"></span>直觉：为什么 LLM 版尤其需要 clip</h3>
+        <ul class="clean">
+          <li>LLM 的词表几万词，同一个 token 的概率可能被更新几步后放大 5 倍（\(\rho=5\)）——如果不限幅，一次更新就能把策略搞"漂"。</li>
+          <li>RLHF 里一个样本要复用 1~4 个 epoch，epoch 越多，\(\rho\) 越容易越界——clip 让"旧数据多用几次"从危险变成可控。</li>
+          <li>配合第 05 节的 KL 惩罚（软性扣分）和这里的 clip（硬性限幅），就是"软硬兼施"的双保险。</li>
+        </ul>
+
+        <h3><span class="dot"></span>交互图：亲眼看 clip 如何工作</h3>
+        <p>横轴是 \(\rho\)（当前/旧策略对一个词的概率比），纵轴是目标贡献。拖动 \(\rho\) 指针、切换正负优势、调整 \(\varepsilon\)：</p>
+        <div class="ctrl">
+          <div>
+            <button class="btn active" id="modePos">优势 A &gt; 0（好词）</button>
+            <button class="btn" id="modeNeg">优势 A &lt; 0（坏词）</button>
+          </div>
+          <div class="slider-group">
+            <label>裁剪范围 ε</label>
+            <input type="range" id="clipEps" min="0.05" max="0.5" step="0.01" value="0.2">
+            <span class="slider-val" id="clipEpsVal">0.20</span>
+          </div>
+        </div>
+        <canvas id="clipChart" height="340"></canvas>
+        <div class="chart-cap" id="clipCaption">拖动图中圆点改变 ρ · 目标值实时计算</div>
+        <div class="legend">
+          <span class="item"><span class="sw" style="background:#a3aec6"></span>未裁剪线 \(\rho A\)</span>
+          <span class="item"><span class="sw" style="background:#f59e0b"></span>裁剪线 \(\mathrm{clip}(\rho)A\)</span>
+          <span class="item"><span class="sw" style="background:#4f46e5"></span>实际目标 min(···)</span>
+          <span class="item"><span class="sw dot" style="background:#f43f5e"></span>当前 \(\rho\)</span>
+        </div>
+        <div class="note info" id="clipExplain" style="margin-top:12px"></div>
+      </div>
+    </section>
+
+    <!-- ============ 08 循环 ============ -->
+    <section id="s8">
+      <div class="panel">
+        <h2><span class="no">08</span>LLM 版 PPO 训练循环</h2>
+        <p>一轮完整的 RLHF-PPO 训练，是这样的闭环：</p>
+
+        <div class="loop-wrap">
+          <div class="ctrl">
+            <button class="btn active" id="loopPlay">▶ 自动播放</button>
+            <button class="btn" id="loopStep">⏭ 下一步</button>
+            <span class="muted" style="font-size:13px" id="loopIndex">步骤 1 / 9</span>
+          </div>
+          <div class="loop-grid" id="loopGrid"></div>
+        </div>
+
+        <div class="note info">
+          <span class="t">注意这个循环的昂贵之处：</span>第 1 步（采样）是"花钱"的地方——每轮都要重新生成几百上千条回答；第 2~6 步是"省钱"的地方——同一批回答被反复训练。clip + KL 让这种"一鱼多吃"始终安全。
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 09 交互演示 ============ -->
+    <section id="s9">
+      <div class="panel">
+        <h2><span class="no">09</span>交互演示：一个"字符级" LLM 学习 PPO</h2>
+        <p>我们把上面的一切塞进一个最小的场景里亲手跑一遍。词表只有 8 个字，回答固定 2 个字（"天气" + 两个空位）。RM 给不同的两字组合打分（"晴好"最高 +1.0，"雨糟"最差 −0.8），Reference 是"自然的 SFT 基线"。看 PPO 如何驱动策略学向高分组合、KL 如何拉住它、clip 如何限幅。</p>
+
+        <div class="tbl-wrap">
+          <table style="min-width:0">
+            <thead><tr><th>组合</th><th>晴好</th><th>晴长</th><th>雪好</th><th>雪风</th><th>晴糟</th><th>雨长</th><th>雨糟</th><th>雪糟</th><th>其他</th></tr></thead>
+            <tbody>
+              <tr><td class="row-name">RM 分数</td><td style="color:var(--green);font-weight:800">+1.0</td><td>+0.6</td><td>+0.5</td><td>+0.4</td><td>+0.2</td><td>+0.1</td><td style="color:var(--rose);font-weight:800">−0.8</td><td>−0.3</td><td>−0.4</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="note warn">
+          <span class="t">教学简化说明：</span>为了让核心机制可见，演示做了 4 处简化——① 优势用"组内平均基线"代替真正的 Critic+GAE；② 回答长度固定为 2 个词；③ 词表只有 8 个字；④ 一步内完成"采样 → 复用 5 个 epoch"。真实实现里这些都换成大模型形态，但<strong>你在这里看到的机制（奖励回溯、KL 拉回、clip 限幅）一个都不少</strong>。
+        </div>
+
+        <div class="ctrl">
+          <button class="btn active" id="demoPlay">▶ 自动播放</button>
+          <button class="btn" id="demoStep">⏭ 单步</button>
+          <button class="btn" id="demoReset">↺ 重置</button>
+          <div class="slider-group">
+            <label>KL 权重 β</label>
+            <input type="range" id="demoBeta" min="0" max="0.8" step="0.05" value="0.3">
+            <span class="slider-val" id="demoBetaVal">0.30</span>
+          </div>
+          <div class="slider-group">
+            <label>clip ε</label>
+            <input type="range" id="demoEps" min="0.05" max="0.5" step="0.01" value="0.2">
+            <span class="slider-val" id="demoEpsVal">0.20</span>
+          </div>
+          <button class="btn" id="demoNoKL">⚠ 关闭 KL（看奖励黑客）</button>
+        </div>
+
+        <div class="demo-info">
+          <div class="di"><div class="k">迭代</div><div class="v" id="dIter">0</div></div>
+          <div class="di"><div class="k">本轮被 clip 的样本</div><div class="v" id="dClip">0</div></div>
+          <div class="di"><div class="k">总 KL(π‖π_ref)</div><div class="v" id="dKL">0.00</div></div>
+          <div class="di"><div class="k">"晴好"概率</div><div class="v" id="dBest">—</div></div>
+        </div>
+
+        <div id="dist1" class="dist-card">
+          <div class="dc-head">第 1 个字分布 · 虚线 = Reference（SFT 基线）· 实条 = Actor（策略）</div>
+        </div>
+        <div id="dist2" class="dist-card">
+          <div class="dc-head">第 2 个字分布 · 虚线 = Reference · 实条 = Actor</div>
+        </div>
+
+        <div class="muted" style="font-size:13px;margin:10px 0 4px">本轮采样的 8 个回答（绿色 = RM 正分，红色 = 负分，橙色圈 = 训练中被 clip 拦住的样本）：</div>
+        <div class="samples" id="samples"></div>
+
+        <div class="note key" id="demoTip"></div>
+      </div>
+    </section>
+
+    <!-- ============ 10 工程实践 ============ -->
+    <section id="s10">
+      <div class="panel">
+        <h2><span class="no">10</span>工程实践：显存、超参与技巧</h2>
+
+        <h3><span class="dot"></span>为什么 RLHF 这么贵：四模型常驻显存</h3>
+        <p>四个模型 = 至少 4 份参数量常驻显存（Actor、Critic、Reference、RM）。一个 7B 模型做 PPO，轻松吃掉 4 × 7B 参数的内存。工程上的主流解法：</p>
+        <ul class="clean">
+          <li><b>LoRA / QLoRA</b>：只训练 Actor 的低秩适配器，参考/Critic 用低精度冻结，显存骤降一个数量级。</li>
+          <li><b>混合精度</b>：bf16 训练，显存和速度双赢。</li>
+          <li><b>ZeRO 分片</b>：把四份模型参数分片到多卡。</li>
+          <li><b>Reference 计算复用</b>：Reference 的 logits 在采样时算好缓存，更新 epoch 里不用重算。</li>
+        </ul>
+
+        <h3><span class="dot"></span>标准超参表（以常见开源实现为参考）</h3>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th>超参数</th><th>典型值</th><th>作用</th></tr></thead>
+            <tbody>
+              <tr><td class="row-name">clip 范围 ε</td><td>0.2</td><td>控制单步更新上限，越大越激进。</td></tr>
+              <tr><td class="row-name">KL 权重 β</td><td>0.01 ~ 0.1（常随训练自适应）</td><td>策略与 SFT 基线的距离，越大越保守。</td></tr>
+              <tr><td class="row-name">折扣因子 γ</td><td>1.0</td><td>LLM 轨迹短，通常不打折。</td></tr>
+              <tr><td class="row-name">GAE λ</td><td>0.95</td><td>句尾奖励回溯多远。</td></tr>
+              <tr><td class="row-name">每 prompt 采样数</td><td>数十 ~ 上千</td><td>组内多样性，也影响 GRPO 的基线质量。</td></tr>
+              <tr><td class="row-name">PPO epoch</td><td>1 ~ 4</td><td>旧数据复用次数，越多越省但需 clip 兜底。</td></tr>
+              <tr><td class="row-name">梯度裁剪</td><td>1.0</td><td>防个别 token 的极端梯度破坏训练。</td></tr>
+              <tr><td class="row-name">采样温度</td><td>0.7 ~ 1.0</td><td>采样时动作分布的"锐度"，训练通常固定。</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3><span class="dot"></span>三个常用进阶技巧</h3>
+        <ul class="clean">
+          <li><b>KL 自适应（adaptive KL）</b>：监控 KL 散度，过高就调大 \(\beta\)，过低就调小——让约束松紧自动跟随训练。</li>
+          <li><b>长度归一化奖励</b>：RM 分数除以回答长度，防止模型靠"更长"刷分（缓解注水倾向）。</li>
+          <li><b>PPO-penalty vs PPO-clip</b>：不放心 clip 时可以直接把 KL 项加进目标（penalty 版），两种都常用。</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ============ 11 误区 ============ -->
+    <section id="s11">
+      <div class="panel">
+        <h2><span class="no">11</span>LLM 版 PPO 特有误区</h2>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th>常见说法</th><th>正误</th><th>真相</th></tr></thead>
+            <tbody>
+              <tr>
+                <td class="row-name">"LLM 每一步都有奖励"</td>
+                <td class="cross">✗</td>
+                <td>RM 只在句尾打分。每步的"奖励"主要是 KL 惩罚项，真正的质量信号必须从句尾回溯。</td>
+              </tr>
+              <tr>
+                <td class="row-name">"clip 够了，不需要 Reference / KL"</td>
+                <td class="cross">✗</td>
+                <td>clip 管"更新幅度"，KL 管"内容别跑偏"——LLM 必须双管齐下，否则会奖励黑客。</td>
+              </tr>
+              <tr>
+                <td class="row-name">"Critic 可有可无"</td>
+                <td class="cross">✗</td>
+                <td>标准 PPO 必须用 Critic 提供 GAE 基线。去掉 Critic 的是 GRPO 等变体，不是 PPO。</td>
+              </tr>
+              <tr>
+                <td class="row-name">"采样温度不影响 PPO"</td>
+                <td class="cross">✗</td>
+                <td>温度改变动作分布 → 改变 \(\rho\) 的含义与样本质量。训练采样温度应固定并记录。</td>
+              </tr>
+              <tr>
+                <td class="row-name">"多 epoch 复用旧数据是偷懒"</td>
+                <td class="cross">✗</td>
+                <td>这是 PPO 的核心设计：采样贵 → 复用多次 → clip 确保安全。高效且正当。</td>
+              </tr>
+              <tr>
+                <td class="row-name">"RM 越准效果越好"</td>
+                <td class="cross">△</td>
+                <td>RM 过拟合偏好数据会诱发奖励黑客。KL 与 \(\beta\) 调参常常比"更好的 RM"更关键。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 12 总结 ============ -->
+    <section id="s12">
+      <div class="panel">
+        <h2><span class="no">12</span>一张图记住 LLM 版 PPO</h2>
+
+        <div class="formula dark">
+          <div class="label">记忆公式</div>
+          <div class="txt">
+            LLM-PPO = <span style="color:#67e8f9">采样（跑一遍生成）</span> + <span style="color:#a7f3d0">句尾 RM 打分</span> + <span style="color:#fda4af">逐词 KL 扣分</span> + <span style="color:#c4b5fd">回溯成逐词优势（GAE）</span> + <span style="color:#fbbf24">clip 限幅更新</span>
+          </div>
+        </div>
+
+        <div class="note key">
+          <span class="t">记忆三句话：</span>
+          <b>①</b> 动作是"选词"，奖励只在句尾——所以要把总分回溯给每个词；
+          <b>②</b> 除了 clip 限幅，还要用 Reference 的 KL 惩罚拽住策略——防"高分胡话"；
+          <b>③</b> 采样贵，旧数据复用多个 epoch 才划算——而 clip + KL 正是让复用安全的保险。
+        </div>
+
+        <div class="note info">
+          <span class="t">在你整个笔记体系中的位置：</span>这版 PPO 是"完整但昂贵"的 RL 标准解（4 模型）。理解了它，你就自然明白为什么 GRPO 要砍掉 Critic（DeepSeek-R1 路线）、DPO 为什么能连 RL 都省掉——它们都是在"保住 PPO 的效果，砍掉 PPO 的成本"。
+        </div>
+
+        <div class="end-note">
+          本页为图解学习笔记 · 关键词：RLHF · Per-token 奖励 · KL 惩罚 · 奖励回溯 · GAE · Clip · 四模型架构
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+/* ============================================================
+   工具
+============================================================ */
+function setupCanvas(cv) {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = cv.getBoundingClientRect();
+  cv.width = Math.max(10, rect.width * dpr);
+  cv.height = Math.max(10, rect.height * dpr);
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return ctx;
+}
+function fmt(x, n) { return x.toFixed(n === undefined ? 2 : n); }
+
+/* ============================================================
+   侧边栏高亮
+============================================================ */
+const sections = document.querySelectorAll('main section');
+const navLinks = document.querySelectorAll('.sidebar a');
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      navLinks.forEach(a => a.classList.remove('active'));
+      const link = document.querySelector('.sidebar a[href="#' + entry.target.id + '"]');
+      if (link) link.classList.add('active');
+    }
+  });
+}, { rootMargin: '-20% 0px -70% 0px' });
+sections.forEach(s => observer.observe(s));
+
+/* ============================================================
+   07 · clip 交互图
+============================================================ */
+(function () {
+  const cv = document.getElementById('clipChart');
+  const ctx = setupCanvas(cv);
+  let mode = 'pos', eps = 0.2, rho = 1.2, dragging = false;
+  const btnPos = document.getElementById('modePos');
+  const btnNeg = document.getElementById('modeNeg');
+  const epsIn = document.getElementById('clipEps');
+  const epsVal = document.getElementById('clipEpsVal');
+  const caption = document.getElementById('clipCaption');
+  const explain = document.getElementById('clipExplain');
+
+  const padL = 44, padR = 14, padT = 14, padB = 36;
+  const X0 = 0, X1 = 3, Y0 = -3.2, Y1 = 3.2;
+
+  function x2px(x) { return padL + (x - X0) / (X1 - X0) * (cv.width / (window.devicePixelRatio || 1) - padL - padR); }
+  function y2py(y) { return padT + (Y1 - y) / (Y1 - Y0) * (cv.height / (window.devicePixelRatio || 1) - padT - padB); }
+  function px2x(px) { return X0 + (px - padL) / (cv.width / (window.devicePixelRatio || 1) - padL - padR) * (X1 - X0); }
+  function clipR(x) { return Math.min(1 + eps, Math.max(1 - eps, x)); }
+  function A() { return mode === 'pos' ? 1 : -1; }
+  function unclip(x) { return x * A(); }
+  function clipObj(x) { return clipR(x) * A(); }
+  function obj(x) { return Math.min(unclip(x), clipObj(x)); }
+
+  function draw() {
+    const W = cv.width / (window.devicePixelRatio || 1);
+    const H = cv.height / (window.devicePixelRatio || 1);
+    ctx.clearRect(0, 0, W, H);
+    ctx.strokeStyle = '#eef0f6'; ctx.lineWidth = 1;
+    for (let gx = 0; gx <= 3; gx += 0.5) { ctx.beginPath(); ctx.moveTo(x2px(gx), padT); ctx.lineTo(x2px(gx), H - padB); ctx.stroke(); }
+    for (let gy = -3; gy <= 3; gy += 1) { ctx.beginPath(); ctx.moveTo(padL, y2py(gy)); ctx.lineTo(W - padR, y2py(gy)); ctx.stroke(); }
+    ctx.strokeStyle = '#c7cbe0'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(padL, y2py(0)); ctx.lineTo(W - padR, y2py(0)); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x2px(0), padT); ctx.lineTo(x2px(0), H - padB); ctx.stroke();
+    ctx.fillStyle = '#8a93ad'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+    for (let gx = 0; gx <= 3; gx += 1) ctx.fillText(gx, x2px(gx), H - padB + 15);
+    ctx.textAlign = 'right';
+    for (let gy = -3; gy <= 3; gy += 1) ctx.fillText(gy, padL - 6, y2py(gy) + 4);
+    ctx.fillStyle = '#56617a'; ctx.font = 'bold 11px sans-serif';
+    ctx.fillText('ρ', W - padR - 6, padT + 10);
+    ctx.fillText('目标值', padL + 4, padT + 10);
+
+    [1 - eps, 1, 1 + eps].forEach(v => {
+      ctx.strokeStyle = '#d8dbe8'; ctx.setLineDash([4, 4]); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x2px(v), padT); ctx.lineTo(x2px(v), H - padB); ctx.stroke();
+      ctx.setLineDash([]);
+    });
+    ctx.fillStyle = '#56617a'; ctx.font = '11px sans-serif';
+    ctx.fillText('ρ=1-ε', x2px(1 - eps), H - padB + 28);
+    ctx.fillText('ρ=1', x2px(1), H - padB + 28);
+    ctx.fillText('ρ=1+ε', x2px(1 + eps), H - padB + 28);
+
+    const N = 300;
+    ctx.beginPath();
+    for (let i = 0; i <= N; i++) { const x = X0 + (X1 - X0) * i / N; const y = unclip(x); i === 0 ? ctx.moveTo(x2px(x), y2py(y)) : ctx.lineTo(x2px(x), y2py(y)); }
+    for (let i = N; i >= 0; i--) { const x = X0 + (X1 - X0) * i / N; const y = obj(x); ctx.lineTo(x2px(x), y2py(y)); }
+    ctx.closePath();
+    ctx.fillStyle = mode === 'pos' ? 'rgba(244,63,94,.08)' : 'rgba(16,185,129,.08)';
+    ctx.fill();
+
+    ctx.strokeStyle = '#a3aec6'; ctx.lineWidth = 1.6; ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    for (let i = 0; i <= N; i++) { const x = X0 + (X1 - X0) * i / N; const y = unclip(x); i === 0 ? ctx.moveTo(x2px(x), y2py(y)) : ctx.lineTo(x2px(x), y2py(y)); }
+    ctx.stroke(); ctx.setLineDash([]);
+
+    ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    for (let i = 0; i <= N; i++) { const x = X0 + (X1 - X0) * i / N; const y = clipObj(x); i === 0 ? ctx.moveTo(x2px(x), y2py(y)) : ctx.lineTo(x2px(x), y2py(y)); }
+    ctx.stroke();
+
+    ctx.strokeStyle = '#4f46e5'; ctx.lineWidth = 3.2;
+    ctx.beginPath();
+    for (let i = 0; i <= N; i++) { const x = X0 + (X1 - X0) * i / N; const y = obj(x); i === 0 ? ctx.moveTo(x2px(x), y2py(y)) : ctx.lineTo(x2px(x), y2py(y)); }
+    ctx.stroke();
+
+    const px = x2px(rho), py = y2py(obj(rho));
+    ctx.strokeStyle = '#f43f5e'; ctx.lineWidth = 1.4; ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.moveTo(px, padT); ctx.lineTo(px, H - padB); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = '#f43f5e';
+    ctx.beginPath(); ctx.arc(px, py, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI * 2); ctx.fill();
+
+    const clipped = mode === 'pos' ? rho > 1 + eps : rho < 1 - eps;
+    caption.innerHTML = '当前 ρ = ' + fmt(rho, 2) + ' · 目标值 = ' + fmt(obj(rho), 3) +
+      (clipped ? ' · <b style="color:#f43f5e">已触发 clip：这个词的更新被摁住</b>' : ' · 安全区：这个词正常贡献梯度');
+    explain.innerHTML = '<span class="t">解读：</span>' + (mode === 'pos'
+      ? (clipped ? '这是一个"好词"，但新策略已经把它概率推到 \(1+\varepsilon\) 之上。目标被截平，这个词不再推动更新——防止一次更新就把某个词的概率顶爆。'
+                : '这是一个"好词"，\(\rho\) 还在安全区。目标随 \(\rho\) 线性上升，这个词正常贡献"提高其概率"的梯度。')
+      : (clipped ? '这是一个"坏词"，新策略已经把它概率压到 \(1-\varepsilon\) 之下。目标被截平，梯度为 0——防止无限打压导致极端化。'
+                : '这是一个"坏词"，\(\rho\) 还在安全区。目标随 \(\rho\) 下降，这个词正常贡献"降低其概率"的梯度。'));
+  }
+
+  btnPos.addEventListener('click', () => { mode = 'pos'; btnPos.classList.add('active'); btnNeg.classList.remove('active'); draw(); });
+  btnNeg.addEventListener('click', () => { mode = 'neg'; btnNeg.classList.add('active'); btnPos.classList.remove('active'); draw(); });
+  epsIn.addEventListener('input', () => { eps = parseFloat(epsIn.value); epsVal.textContent = fmt(eps); draw(); });
+  function pointerX(ev) {
+    const rect = cv.getBoundingClientRect();
+    return (ev.clientX - rect.left) * (cv.width / (window.devicePixelRatio || 1)) / rect.width;
+  }
+  cv.addEventListener('mousedown', ev => { dragging = true; rho = Math.max(0.02, Math.min(2.98, px2x(pointerX(ev)))); draw(); });
+  window.addEventListener('mousemove', ev => { if (dragging) { rho = Math.max(0.02, Math.min(2.98, px2x(pointerX(ev)))); draw(); } });
+  window.addEventListener('mouseup', () => { dragging = false; });
+  draw();
+})();
+
+/* ============================================================
+   06 · GAE 权重图
+============================================================ */
+(function () {
+  const cv = document.getElementById('gaeChart');
+  const ctx = setupCanvas(cv);
+  const lamIn = document.getElementById('gaeLam');
+  const lamVal = document.getElementById('gaeLamVal');
+  let lam = 0.95;
+  const GAMMA = 1.0;
+  const MAXL = 24;
+  function draw() {
+    const W = cv.width / (window.devicePixelRatio || 1);
+    const H = cv.height / (window.devicePixelRatio || 1);
+    ctx.clearRect(0, 0, W, H);
+    const padL = 44, padR = 10, padT = 16, padB = 30;
+    const plotW = W - padL - padR, plotH = H - padT - padB;
+    const weights = [];
+    for (let l = 0; l <= MAXL; l++) weights.push(Math.pow(GAMMA * lam, l));
+    const bw = plotW / (MAXL + 1) * 0.72;
+    for (let l = 0; l <= MAXL; l++) {
+      const w = weights[l];
+      const x = padL + l * (plotW / (MAXL + 1)) + (plotW / (MAXL + 1)) * 0.14;
+      const hgt = Math.min(w, 1) * plotH;
+      ctx.fillStyle = w > 1e-3 ? 'rgba(79,70,229,.75)' : 'rgba(148,163,184,.25)';
+      ctx.fillRect(x, padT + plotH - hgt, bw, hgt);
+    }
+    ctx.strokeStyle = '#c7cbe0'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(padL, padT); ctx.lineTo(padL, padT + plotH); ctx.lineTo(W - padR, padT + plotH); ctx.stroke();
+    ctx.fillStyle = '#8a93ad'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+    [0, 4, 8, 12, 16, 20, 24].forEach(l => ctx.fillText(l, padL + l * (plotW / (MAXL + 1)), padT + plotH + 15));
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#56617a'; ctx.font = 'bold 11px sans-serif';
+    ctx.fillText('从当前词往未来数第 l 步的权重', padL, padT - 4);
+    lamVal.textContent = fmt(lam);
+  }
+  lamIn.addEventListener('input', () => { lam = parseFloat(lamIn.value); draw(); });
+  draw();
+})();
+
+/* ============================================================
+   08 · 训练循环动画（LLM 版）
+============================================================ */
+(function () {
+  const steps = [
+    { name: '采样（Rollout）', desc: '对一批 prompt，用当前 Actor 生成 N 个完整回答，记录每个 token 的生成概率（供 \(\rho\) 用）。这是最"烧钱"的一步。' },
+    { name: '句尾打分', desc: 'RM 对每个完整回答给出总分 \(R(x,y)\)。分数只在这个时刻出现。' },
+    { name: '逐词 KL 惩罚', desc: '用 Reference 逐词计算 \(\beta(\log\pi_{\text{ref}} - \log\pi_\theta)\)，给每步一个"别跑偏"的即时奖励。' },
+    { name: '回溯成逐词优势', desc: '把句尾奖励 + KL 惩罚组合成每步奖励，再用 Critic + GAE 算出每个 token 的优势 \(A_t\)。' },
+    { name: '构造 PPO 目标', desc: '对每个 token 计算 \(\min(\rho A, \mathrm{clip}(\rho)A)\) 的梯度：好词提概率、坏词降概率，但都被限幅。' },
+    { name: '更新 Actor 与 Critic', desc: '沿梯度方向更新策略参数；同步让 Critic 更准确估计 \(V(s)\)。' },
+    { name: '旧数据上多 epoch 优化', desc: '同一批回答反复更新 1~4 轮。\(\rho\) 每轮重算，clip 继续守着——"一鱼多吃"的安全所在。' },
+    { name: '同步，进入下一轮', desc: '把 \(\pi_{\text{old}} \leftarrow \pi_\theta\)，用更新后的策略重新采样，循环往复。' }
+  ];
+  const grid = document.getElementById('loopGrid');
+  steps.forEach((s, i) => {
+    const d = document.createElement('div');
+    d.className = 'loop-step' + (i === 0 ? ' active' : '');
+    d.innerHTML = '<span class="step-idx">第 ' + (i + 1) + ' 步</span><div class="step-name">' + s.name + '</div><div class="step-desc">' + s.desc + '</div>';
+    grid.appendChild(d);
+  });
+  const stepsEl = grid.children;
+  const idxEl = document.getElementById('loopIndex');
+  let cur = 0, timer = null;
+  function show(i) {
+    cur = i % steps.length;
+    Array.from(stepsEl).forEach((el, k) => el.classList.toggle('active', k === cur));
+    idxEl.textContent = '步骤 ' + (cur + 1) + ' / ' + steps.length;
+  }
+  function play() {
+    if (timer) { clearInterval(timer); timer = null; playBtn.classList.add('active'); return; }
+    playBtn.classList.remove('active');
+    timer = setInterval(() => show(cur + 1), 2800);
+  }
+  const playBtn = document.getElementById('loopPlay');
+  const stepBtn = document.getElementById('loopStep');
+  playBtn.addEventListener('click', play);
+  stepBtn.addEventListener('click', () => { if (timer) { clearInterval(timer); timer = null; playBtn.classList.add('active'); } show(cur + 1); });
+})();
+
+/* ============================================================
+   09 · 字符级 LLM PPO 训练演示
+============================================================ */
+(function () {
+  const V = ['晴', '雨', '雪', '风', '好', '糟', '长', '短'];
+  const refLogits = [
+    [0.9, 0.3, 0.7, -0.2, -1.5, -2.0, -2.5, -2.5],
+    [0.2, -1.0, -1.2, -0.3, 0.7, 0.3, -0.5, -0.8]
+  ];
+  const RM_TABLE = { '晴好': 1.0, '晴长': 0.6, '雪好': 0.5, '雪风': 0.4, '晴糟': 0.2, '雨长': 0.1, '雨糟': -0.8, '雪糟': -0.3 };
+
+  function softmax(z) { const m = Math.max(...z); const e = z.map(x => Math.exp(x - m)); const s = e.reduce((a, b) => a + b, 0); return e.map(x => x / s); }
+  const refP = refLogits.map(softmax);
+  function RM(w0, w1) { return RM_TABLE[w0 + w1] !== undefined ? RM_TABLE[w0 + w1] : -0.4; }
+  function sample(p) { const r = Math.random(); let acc = 0; for (let i = 0; i < p.length; i++) { acc += p[i]; if (r <= acc) return i; } return p.length - 1; }
+  function klDiv(p, q) { let s = 0; for (let i = 0; i < p.length; i++) s += p[i] * (Math.log(p[i] + 1e-9) - Math.log(q[i] + 1e-9)); return s; }
+
+  const K = 8, EPOCHS = 5, LR = 0.8;
+  const state = {
+    logits: refLogits.map(a => a.slice()),
+    iter: 0, clipN: 0, kl: 0, best: 0,
+    samples: [], clippedIdx: []
+  };
+  let beta = 0.3, eps = 0.2, noKL = false, playing = false, timer = null;
+
+  function step() {
+    const zOld = state.logits.map(a => a.slice());
+    const pOld = zOld.map(softmax);
+    // 采样 K 个回答
+    const samples = [];
+    for (let k = 0; k < K; k++) {
+      const w0 = sample(pOld[0]), w1 = sample(pOld[1]);
+      samples.push({ w0, w1, R: RM(V[w0], V[w1]), p0: pOld[0][w0], p1: pOld[1][w1] });
+    }
+    // 句尾奖励回溯到每个 token（γ=1）+ per-token KL 惩罚（用采样时策略）
+    const r0s = [], r1s = [];
+    const bEff = noKL ? 0 : beta;
+    for (const s of samples) {
+      const kl0 = Math.log(refP[0][s.w0] + 1e-9) - Math.log(s.p0 + 1e-9);
+      const kl1 = Math.log(refP[1][s.w1] + 1e-9) - Math.log(s.p1 + 1e-9);
+      r0s.push(s.R + bEff * kl0);
+      r1s.push(s.R + bEff * kl1);
+    }
+    const b0 = r0s.reduce((a, b) => a + b, 0) / K;
+    const b1 = r1s.reduce((a, b) => a + b, 0) / K;
+
+    // 多 epoch clip 更新
+    let clipTotal = 0;
+    const clippedFlags = new Array(K).fill(false);
+    for (let e = 0; e < EPOCHS; e++) {
+      const pCur = state.logits.map(softmax);
+      const g = [new Array(8).fill(0), new Array(8).fill(0)];
+      for (let k = 0; k < K; k++) {
+        const s = samples[k];
+        const A0 = r0s[k] - b0, A1 = r1s[k] - b1;
+        const rho0 = pCur[0][s.w0] / s.p0, rho1 = pCur[1][s.w1] / s.p1;
+        const eff0 = A0 >= 0 ? Math.min(rho0, 1 + eps) : Math.max(rho0, 1 - eps);
+        const eff1 = A1 >= 0 ? Math.min(rho1, 1 + eps) : Math.max(rho1, 1 - eps);
+        if ((A0 >= 0 && rho0 > 1 + eps) || (A0 < 0 && rho0 < 1 - eps)) { clipTotal++; clippedFlags[k] = true; }
+        if ((A1 >= 0 && rho1 > 1 + eps) || (A1 < 0 && rho1 < 1 - eps)) { clipTotal++; clippedFlags[k] = true; }
+        for (let v = 0; v < 8; v++) {
+          g[0][v] += eff0 * A0 * ((v === s.w0 ? 1 : 0) - pCur[0][v]);
+          g[1][v] += eff1 * A1 * ((v === s.w1 ? 1 : 0) - pCur[1][v]);
+        }
+      }
+      for (let v = 0; v < 8; v++) {
+        state.logits[0][v] += LR * g[0][v] / K;
+        state.logits[1][v] += LR * g[1][v] / K;
+      }
+    }
+
+    const p = state.logits.map(softmax);
+    state.iter++;
+    state.clipN = clipTotal;
+    state.kl = klDiv(p[0], refP[0]) + klDiv(p[1], refP[1]);
+    state.best = p[0][0] * p[1][4];
+    state.samples = samples;
+    state.clippedIdx = clippedFlags;
+    render();
+  }
+
+  function reset() {
+    if (timer) { clearInterval(timer); timer = null; playBtn.classList.add('active'); playing = false; }
+    state.logits = refLogits.map(a => a.slice());
+    state.iter = 0; state.clipN = 0; state.kl = 0; state.best = 0; state.samples = []; state.clippedIdx = [];
+    render();
+  }
+
+  function renderDist(el, pos) {
+    const titles = [
+      '第 1 个字分布 · 虚线 = Reference（SFT 基线）· 实条 = Actor（策略）',
+      '第 2 个字分布 · 虚线 = Reference · 实条 = Actor'
+    ];
+    const p = state.logits.map(softmax)[pos];
+    let html = '<div class="dc-head">' + titles[pos] + '</div>';
+    V.forEach((w, i) => {
+      const rp = refP[pos][i];
+      const ap = p[i];
+      const hi = (pos === 0 && i === 0) || (pos === 1 && i === 4);
+      html += '<div class="drow">' +
+        '<span class="w' + (hi ? ' hi' : '') + '">' + w + (hi ? '★' : '') + '</span>' +
+        '<div class="dtrack">' +
+          '<div class="ref-bar" style="width:' + (rp * 100) + '%"></div>' +
+          '<div class="act-bar" style="width:' + (ap * 100) + '%"></div>' +
+        '</div>' +
+        '<span class="p">ref ' + fmt(rp * 100, 0) + '% · act ' + fmt(ap * 100, 0) + '%</span>' +
+      '</div>';
+    });
+    el.innerHTML = html;
+  }
+
+  function render() {
+    const p = state.logits.map(softmax);
+    // 分布
+    renderDist(document.getElementById('dist1'), 0);
+    renderDist(document.getElementById('dist2'), 1);
+    // 指标
+    document.getElementById('dIter').textContent = state.iter;
+    document.getElementById('dClip').textContent = state.clipN;
+    document.getElementById('dKL').textContent = fmt(state.kl, 2);
+    document.getElementById('dBest').textContent = state.iter > 0 ? fmt(state.best * 100, 1) + '%' : '—';
+    // 采样回答
+    const box = document.getElementById('samples');
+    box.innerHTML = '';
+    state.samples.forEach((s, i) => {
+      const good = s.R >= 0;
+      const d = document.createElement('div');
+      d.className = 'sample ' + (good ? 'good' : 'bad');
+      const clipMark = state.clippedIdx[i] ? ' <span class="clip-mark">◌clip</span>' : '';
+      d.innerHTML = '<div class="toks">' + V[s.w0] + ' ' + V[s.w1] + clipMark + '</div>' +
+        '<div class="rm">RM ' + (s.R >= 0 ? '+' : '') + s.R.toFixed(1) + '</div>';
+      box.appendChild(d);
+    });
+    // 提示
+    const tip = document.getElementById('demoTip');
+    if (state.iter === 0) {
+      tip.innerHTML = '<span class="t">玩法：</span>点"自动播放"，观察实色条（Actor）如何逐步超过虚线（Reference）、朝高分组合「晴好」移动。试试把 β 调大再跑：策略会更保守、贴着 SFT 基线；把 β 调小或"关闭 KL"：概率会冲得很极端——那就是奖励黑客的味道。';
+    } else if (noKL) {
+      tip.innerHTML = '<span class="t">当前：KL 已关闭。</span>没有 KL 扣分，策略只追 RM 高分，概率会快速冲到极端（注意「晴」「好」几乎霸占全部分布）。对比开启 KL 时它被温和地"拽住"的样子。';
+    } else if (state.clipN > 0) {
+      tip.innerHTML = '<span class="t">当前迭代有 ' + state.clipN + ' 个样本被 clip 拦住</span>（橙色 ◌ 标记）。复用旧数据多轮后，\(\rho\) 越界，clip 把它们的更新摁住——这就是安全气囊在起作用。';
+    } else {
+      tip.innerHTML = '<span class="t">观察：</span>策略正向「晴好」（RM +1.0）移动，KL 值 = ' + fmt(state.kl, 2) + ' 说明它离 SFT 基线仍不远。你可以用"关闭 KL"对比极端化的差异。';
+    }
+  }
+
+  const playBtn = document.getElementById('demoPlay');
+  const stepBtn = document.getElementById('demoStep');
+  const resetBtn = document.getElementById('demoReset');
+  const betaIn = document.getElementById('demoBeta');
+  const betaVal = document.getElementById('demoBetaVal');
+  const epsIn = document.getElementById('demoEps');
+  const epsVal = document.getElementById('demoEpsVal');
+  const noKLBtn = document.getElementById('demoNoKL');
+
+  playBtn.addEventListener('click', () => {
+    if (playing) { clearInterval(timer); timer = null; playing = false; playBtn.classList.add('active'); return; }
+    playing = true; playBtn.classList.remove('active');
+    timer = setInterval(() => step(), 700);
+  });
+  stepBtn.addEventListener('click', () => { if (playing) { clearInterval(timer); timer = null; playing = false; playBtn.classList.add('active'); } step(); });
+  resetBtn.addEventListener('click', reset);
+  betaIn.addEventListener('input', () => { beta = parseFloat(betaIn.value); betaVal.textContent = fmt(beta); });
+  epsIn.addEventListener('input', () => { eps = parseFloat(epsIn.value); epsVal.textContent = fmt(eps); });
+  noKLBtn.addEventListener('click', () => {
+    noKL = !noKL;
+    noKLBtn.classList.toggle('warn-active', noKL);
+  });
+
+  reset();
+})();
+
+window.addEventListener('resize', () => { location.reload(); });
+</script>
+</body>
+</html>

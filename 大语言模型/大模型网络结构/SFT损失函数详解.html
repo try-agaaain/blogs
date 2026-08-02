@@ -1,0 +1,936 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SFT 损失函数全拆解 · 监督微调详解</title>
+<script>
+window.MathJax = {
+  tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] },
+  svg: { fontCache: 'global' }
+};
+</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+<style>
+:root {
+  --bg: #f6f7fb;
+  --panel: #ffffff;
+  --ink: #1b2330;
+  --ink-2: #56617a;
+  --line: #e4e8f0;
+  --primary: #4f46e5;
+  --primary-2: #7c3aed;
+  --accent: #06b6d4;
+  --green: #10b981;
+  --amber: #f59e0b;
+  --rose: #f43f5e;
+  --radius: 16px;
+  --shadow: 0 1px 2px rgba(27,35,48,.06), 0 8px 24px rgba(27,35,48,.06);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 90px; }
+body {
+  font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  line-height: 1.75;
+  font-size: 15px;
+}
+::selection { background: rgba(79,70,229,.18); }
+
+/* ---------- Hero ---------- */
+.hero {
+  position: relative;
+  padding: 56px 40px 40px;
+  background:
+    radial-gradient(900px 340px at 15% -10%, rgba(124,58,237,.20), transparent 60%),
+    radial-gradient(800px 300px at 90% 0%, rgba(6,182,212,.16), transparent 60%),
+    linear-gradient(135deg, #141a2e 0%, #1b2336 60%, #232a45 100%);
+  color: #f4f6ff;
+}
+.hero .wrap { max-width: 1060px; margin: 0 auto; }
+.hero .tag {
+  display: inline-block; font-size: 12px; letter-spacing: .12em;
+  padding: 4px 12px; border-radius: 999px;
+  background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.18);
+  color: #c9d4ff; margin-bottom: 16px;
+}
+.hero h1 { font-size: 33px; font-weight: 800; letter-spacing: .5px; line-height: 1.3; }
+.hero h1 .grad {
+  background: linear-gradient(90deg, #93c5fd, #c4b5fd, #67e8f9);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.hero p.sub { margin-top: 14px; color: #b9c2e0; max-width: 780px; font-size: 15px; }
+.hero .meta { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 10px; }
+.hero .chip {
+  font-size: 12px; color: #dfe6ff; background: rgba(255,255,255,.08);
+  border: 1px solid rgba(255,255,255,.14); padding: 4px 12px; border-radius: 999px;
+}
+
+/* ---------- 布局 ---------- */
+.layout { max-width: 1280px; margin: 0 auto; display: flex; gap: 28px; padding: 0 24px; }
+.sidebar {
+  width: 264px; flex-shrink: 0; position: sticky; top: 0; align-self: flex-start;
+  height: 100vh; overflow-y: auto; padding: 24px 8px 24px 0;
+}
+.sidebar .toc-title { font-size: 12px; letter-spacing: .1em; color: var(--ink-2); font-weight: 700; margin: 8px 0 10px; padding-left: 12px; }
+.sidebar a {
+  display: block; padding: 7px 12px; border-radius: 10px; color: var(--ink-2);
+  text-decoration: none; font-size: 13.5px; border-left: 3px solid transparent; transition: all .18s ease;
+}
+.sidebar a:hover { background: #edf0fa; color: var(--ink); }
+.sidebar a.active {
+  background: linear-gradient(90deg, rgba(79,70,229,.12), rgba(79,70,229,.03));
+  color: var(--primary); border-left-color: var(--primary); font-weight: 600;
+}
+main { flex: 1; min-width: 0; max-width: 860px; padding: 28px 0 90px; }
+
+/* ---------- 区块 ---------- */
+.panel {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 28px 30px; margin-bottom: 22px;
+}
+h2 {
+  font-size: 22px; font-weight: 800; display: flex; align-items: center; gap: 10px;
+  margin-bottom: 18px; letter-spacing: .3px;
+}
+h2 .no {
+  font-size: 13px; font-weight: 800; color: #fff;
+  background: linear-gradient(135deg, var(--primary), var(--primary-2));
+  width: 28px; height: 28px; border-radius: 9px;
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+h3 { font-size: 16.5px; font-weight: 700; margin: 26px 0 10px; display: flex; align-items: center; gap: 8px; }
+h3 .dot { width: 8px; height: 8px; border-radius: 50%; background: linear-gradient(135deg, var(--primary), var(--primary-2)); flex-shrink: 0; }
+p { color: var(--ink); margin: 10px 0; }
+.muted { color: var(--ink-2); }
+b, strong { color: #141b2d; }
+
+.formula {
+  background: linear-gradient(180deg, #f8f7ff, #f3f1ff);
+  border: 1px solid #e2dcff; border-left: 4px solid var(--primary);
+  border-radius: 12px; padding: 16px 20px; margin: 14px 0; overflow-x: auto;
+}
+.formula .label { font-size: 12px; color: var(--primary); font-weight: 700; letter-spacing: .06em; margin-bottom: 6px; }
+.formula.dark {
+  background: linear-gradient(135deg, #141a2e, #262f52); border-color: #3d4a7a; border-left-color: #7c8cf5;
+}
+.formula.dark .label { color: #93c5fd; }
+.formula.dark div[style] { color: #e8ecff; }
+
+.note { border-radius: 12px; padding: 14px 18px; margin: 14px 0; font-size: 14px; border: 1px solid; }
+.note.info { background: #eef6ff; border-color: #cfe4fb; color: #15529c; }
+.note.warn { background: #fff7ec; border-color: #fadcae; color: #92500b; }
+.note.key { background: #f1fdf7; border-color: #bfead6; color: #0e7a4d; }
+.note .t { font-weight: 700; margin-right: 6px; }
+
+ul.clean { margin: 8px 0 8px 4px; list-style: none; }
+ul.clean li { position: relative; padding-left: 22px; margin: 7px 0; }
+ul.clean li::before {
+  content: ""; position: absolute; left: 4px; top: 10px;
+  width: 7px; height: 7px; border-radius: 2px;
+  background: linear-gradient(135deg, var(--primary), var(--primary-2)); transform: rotate(45deg);
+}
+
+/* 流程图 */
+.pipeline { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 18px 0 6px; }
+.stage {
+  flex: 1; min-width: 130px; border-radius: 14px; padding: 14px 12px 16px;
+  text-align: center; position: relative; background: #fff; border: 2px solid var(--line);
+  transition: transform .2s ease, box-shadow .2s ease;
+}
+.stage:hover { transform: translateY(-4px); box-shadow: var(--shadow); }
+.stage .num {
+  width: 26px; height: 26px; border-radius: 50%; display: inline-flex; align-items: center;
+  justify-content: center; color: #fff; font-weight: 800; font-size: 13px; margin-bottom: 8px;
+}
+.stage .name { font-weight: 700; font-size: 14.5px; }
+.stage .desc { font-size: 12px; color: var(--ink-2); margin-top: 6px; line-height: 1.55; }
+.stage.c1 { border-color: #c7d2fe; } .stage.c1 .num { background: #6366f1; }
+.stage.c2 { border-color: #a5f3fc; } .stage.c2 .num { background: #06b6d4; }
+.stage.c3 { border-color: #a7f3d0; } .stage.c3 .num { background: #10b981; }
+.stage.c4 { border-color: #fde68a; } .stage.c4 .num { background: #f59e0b; }
+.stage.c5 { border-color: #fbcfe8; } .stage.c5 .num { background: #ec4899; }
+.arrow { align-self: center; font-size: 20px; color: #a3aec6; padding: 0 3px; font-weight: 700; flex-shrink: 0; }
+
+/* 数据示例卡 */
+.tpl {
+  background: #0f172a; border-radius: 12px; padding: 16px 20px; margin: 14px 0;
+  color: #cbd5e1; font-family: "SFMono-Regular", Consolas, "Courier New", monospace; font-size: 13.5px; line-height: 1.9;
+  overflow-x: auto; white-space: pre;
+}
+.tpl .hl { color: #fbbf24; font-weight: 700; }
+.tpl .hl2 { color: #34d399; font-weight: 700; }
+.tpl .hl3 { color: #93c5fd; font-weight: 700; }
+.tpl .dim { color: #64748b; }
+
+/* 术语网格 */
+.term-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 14px 0; }
+.term {
+  border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 12px;
+  padding: 12px 16px; background: #fff;
+}
+.term .t { font-weight: 700; font-size: 14px; color: #0e7490; }
+.term .d { font-size: 12.5px; color: var(--ink-2); margin-top: 4px; line-height: 1.6; }
+
+/* 表格 */
+.tbl-wrap { overflow-x: auto; margin: 16px 0; border-radius: 12px; border: 1px solid var(--line); }
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; min-width: 680px; }
+thead th {
+  background: linear-gradient(135deg, #1d2440, #262f52); color: #e8ecff;
+  padding: 12px 14px; text-align: left; font-weight: 700; white-space: nowrap;
+}
+tbody td { padding: 11px 14px; border-top: 1px solid var(--line); vertical-align: top; color: var(--ink); }
+tbody tr:nth-child(even) { background: #f8f9fd; }
+tbody tr:hover { background: #eef1fd; }
+td.row-name { font-weight: 700; color: #2c3350; white-space: nowrap; }
+.check { color: var(--green); font-weight: 800; }
+.cross { color: var(--rose); font-weight: 800; }
+
+/* ---------- 交互式计算器 ---------- */
+.calc {
+  border: 2px solid #d6d4f2; border-radius: 16px; background: #fbfaff;
+  padding: 22px 22px 18px; margin: 18px 0;
+}
+.calc-bar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin-bottom: 14px; }
+.preset-btn {
+  border: 1px solid var(--line); background: #fff; padding: 7px 14px; border-radius: 999px;
+  font-size: 13px; font-weight: 600; color: var(--ink-2); cursor: pointer; transition: all .18s ease;
+}
+.preset-btn:hover { border-color: var(--primary); color: var(--primary); }
+.preset-btn.active {
+  background: linear-gradient(135deg, var(--primary), var(--primary-2)); color: #fff; border-color: transparent;
+  box-shadow: 0 6px 16px rgba(79,70,229,.30);
+}
+.slider-group { display: flex; align-items: center; gap: 10px; }
+.slider-group label { font-size: 13px; color: var(--ink-2); font-weight: 600; white-space: nowrap; }
+.slider-group input[type=range] { width: 150px; accent-color: var(--primary); }
+.slider-val {
+  font-size: 12.5px; font-weight: 800; color: var(--primary);
+  background: #eceafd; border-radius: 8px; padding: 2px 9px; min-width: 52px; text-align: center;
+}
+
+/* 序列可视化 */
+.seq { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 16px; }
+.tok {
+  border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; text-align: center;
+  font-size: 13px; background: #fff; min-width: 56px;
+}
+.tok .w { font-weight: 700; font-size: 14px; }
+.tok .role { font-size: 10.5px; color: var(--ink-2); margin-top: 2px; }
+.tok.mask { background: #f1f2f8; border-style: dashed; color: #9aa3bd; }
+.tok.mask .w, .tok.mask .role { color: #9aa3bd; }
+.tok.ans { border-color: #a7f3d0; background: #f0fdf6; }
+.tok.ans .role { color: #0e7a4d; }
+
+/* 概率条形 */
+.pos { margin-bottom: 14px; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: #fff; }
+.pos-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+.pos-head .idx {
+  font-size: 11.5px; font-weight: 800; color: #fff; background: #3b4a8a; border-radius: 7px; padding: 2px 8px;
+}
+.pos-head .tgt { font-size: 13.5px; font-weight: 700; }
+.pos-head .tgt .star { color: #f59e0b; }
+.pos-head .ce {
+  margin-left: auto; font-size: 12.5px; font-weight: 800; border-radius: 8px; padding: 2px 10px;
+}
+.pos-head .ce.live { background: #fce7f3; color: #be185d; }
+.pos-head .ce.muted-ce { background: #eef0f6; color: #9aa3bd; }
+.pos-head .mask-tag { font-size: 11px; color: #9aa3bd; font-weight: 700; }
+.bar-row { display: flex; align-items: center; gap: 8px; margin: 3px 0; font-size: 12px; }
+.bar-row .w { width: 40px; text-align: right; font-weight: 600; color: var(--ink-2); flex-shrink: 0; }
+.bar-row .w.correct { color: #0e7a4d; font-weight: 800; }
+.bar-track { flex: 1; height: 14px; background: #eef0f6; border-radius: 8px; overflow: hidden; }
+.bar-fill {
+  height: 100%; border-radius: 8px;
+  background: linear-gradient(90deg, #818cf8, #6366f1);
+  transition: width .25s ease;
+}
+.bar-fill.correct { background: linear-gradient(90deg, #34d399, #10b981); }
+.bar-row .p { width: 52px; color: var(--ink-2); font-variant-numeric: tabular-nums; font-size: 11.5px; }
+
+/* 汇总 */
+.summary {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 8px;
+}
+.sum-card { border-radius: 12px; padding: 14px; text-align: center; background: #fff; border: 1px solid var(--line); }
+.sum-card .k { font-size: 12px; color: var(--ink-2); font-weight: 700; letter-spacing: .04em; }
+.sum-card .v { font-size: 24px; font-weight: 800; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.sum-card.main { border: 2px solid var(--primary); background: linear-gradient(180deg, #eef0ff, #f7f6ff); }
+.sum-card.main .v { color: var(--primary); }
+.sum-card .note-txt { font-size: 11px; color: #9aa3bd; margin-top: 2px; }
+
+/* 结尾 */
+.end-note { text-align: center; color: var(--ink-2); font-size: 13px; padding: 26px 0 10px; }
+
+@media (max-width: 980px) {
+  .sidebar { display: none; }
+  .hero { padding: 40px 24px; }
+  .hero h1 { font-size: 26px; }
+  .layout { padding: 0 16px; }
+  .panel { padding: 22px 20px; }
+  .pipeline { flex-direction: column; }
+  .arrow { transform: rotate(90deg); align-self: center; }
+}
+</style>
+</head>
+<body>
+
+<!-- ================= Hero ================= -->
+<header class="hero">
+  <div class="wrap">
+    <span class="tag">大模型训练管线 · 图解笔记 · 第 2 篇</span>
+    <h1><span class="grad">SFT 监督微调</span> 损失函数全拆解</h1>
+    <p class="sub">把 SFT 的损失函数一层层剥开：logits 是什么、Softmax 在做什么、交叉熵为什么这样设计、Teacher Forcing 和掩码起什么作用，最后用交互式计算器亲手验证每一步。</p>
+    <div class="meta">
+      <span class="chip">交叉熵</span>
+      <span class="chip">NLL 负对数似然</span>
+      <span class="chip">Loss Masking</span>
+      <span class="chip">标签平滑</span>
+      <span class="chip">温度缩放</span>
+    </div>
+  </div>
+</header>
+
+<div class="layout">
+  <!-- ================= 侧边导航 ================= -->
+  <nav class="sidebar">
+    <div class="toc-title">目录</div>
+    <a href="#s1">01 · SFT 是什么</a>
+    <a href="#s2">02 · 数据长什么样</a>
+    <a href="#s3">03 · 损失函数地图</a>
+    <a href="#s4">04 · logits：最后的"原生态分数"</a>
+    <a href="#s5">05 · Softmax：分数 → 概率</a>
+    <a href="#s6">06 · 交叉熵：惩罚"猜错"</a>
+    <a href="#s7">07 · Teacher Forcing 与掩码</a>
+    <a href="#s8">08 · 聚合：平均还是求和</a>
+    <a href="#s9">09 · 交互式损失计算器</a>
+    <a href="#s10">10 · 训练细节与梯度直觉</a>
+    <a href="#s11">11 · 常见坑与技巧</a>
+    <a href="#s12">12 · 与其他阶段对比</a>
+  </nav>
+
+  <main>
+    <!-- ================= 01 SFT 是什么 ================= -->
+    <section id="s1">
+      <div class="panel">
+        <h2><span class="no">01</span>SFT 是什么？</h2>
+        <p><b>SFT（Supervised Fine-Tuning，监督微调）</b>是用人工标注的「指令 → 期望回答」数据，对预训练大模型做进一步的训练，让模型学会"遵循指令、像人一样对话"。</p>
+        <p class="muted">一句话版本：预训练让模型"会说人话"，SFT 让模型"会说该说的话"——它是在有标准答案的监督下，教模型模仿优质回答。</p>
+
+        <h3><span class="dot"></span>在训练管线中的位置</h3>
+        <div class="pipeline">
+          <div class="stage c1"><div class="num">1</div><div class="name">预训练</div><div class="desc">自监督学语言规律，量大但格式原始</div></div>
+          <div class="arrow">→</div>
+          <div class="stage c2"><div class="num">2</div><div class="name">SFT 监督微调</div><div class="desc">带标准答案的对话/指令数据，小量但高质量</div></div>
+          <div class="arrow">→</div>
+          <div class="stage c3"><div class="num">3</div><div class="name">RM 奖励模型</div><div class="desc">学习人类偏好，给回答打分</div></div>
+          <div class="arrow">→</div>
+          <div class="stage c4"><div class="num">4</div><div class="name">RL 强化学习</div><div class="desc">PPO / GRPO 等，追求更高奖励</div></div>
+          <div class="arrow">→</div>
+          <div class="stage c5"><div class="num">5</div><div class="name">部署</div><div class="desc">服务真实用户</div></div>
+        </div>
+        <p class="muted">注意：这里 SFT 是第 2 步。预训练已经提供了通用的语言能力，SFT 只是"在标准答案的引导下调整行为"。</p>
+
+        <div class="note key">
+          <span class="t">核心认知：</span>SFT 的全部奥义浓缩在一个损失函数里。接下来的整页内容，都是在回答一个问题：<b>"这个损失函数为什么长这样？每一部分在干嘛？"</b>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 02 数据 ================= -->
+    <section id="s2">
+      <div class="panel">
+        <h2><span class="no">02</span>SFT 吃什么样的数据？</h2>
+        <p>SFT 的数据是 <b>(输入 x, 期望输出 y)</b> 的结构化样本，通常经过「指令模板」包装成模型见过的格式。比如最常用的格式：</p>
+
+        <div class="tpl"><span class="dim">&lt;s&gt;</span>
+<span class="hl">[INST]</span> 请用一句话解释什么是监督微调。 <span class="hl">[/INST]</span>
+<span class="hl2">监督微调是指使用带标注的指令-回答数据，对预训练语言模型进行有监督训练，使其学会遵循指令生成符合期望的回答。</span>
+<span class="hl3">&lt;/s&gt;</span></div>
+
+        <ul class="clean">
+          <li><span class="hl" style="color:#b45309;font-weight:700">[INST] ... [/INST]</span>：用户的指令部分（输入 \(x\)），SFT 阶段模型的注意力可以看到它，但<strong>不算损失</strong>。</li>
+          <li><span class="hl2" style="color:#0e7a4d;font-weight:700">绿色回答部分</span>：标注的标准回答（输出 \(y\)），是损失函数真正监督的对象。</li>
+          <li><span class="dim">特殊 token</span>：<code>&lt;s&gt;</code>、<code>&lt;/s&gt;</code> 标记序列起止。</li>
+        </ul>
+
+        <h3><span class="dot"></span>数据规模与质量</h3>
+        <div class="term-grid">
+          <div class="term"><div class="t">数量</div><div class="d">典型从几万到几百万条。相比预训练的万亿 token，SFT 数据量"少而精"。</div></div>
+          <div class="term"><div class="t">质量 &gt; 数量</div><div class="d">一份高质量数据顶十份低质量数据。LLaMA 论文的实验证明，清理后的高质量子集效果反而更好。</div></div>
+          <div class="term"><div class="t">多样性</div><div class="d">指令跟随、闲聊对话、代码、数学推理、安全拒答……覆盖面越广，泛化越好。</div></div>
+          <div class="term"><div class="t">分布对齐</div><div class="d">训练数据的回答风格，会直接"刻进"模型，因此标注口径必须与最终想要的服务一致。</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 03 损失函数地图 ================= -->
+    <section id="s3">
+      <div class="panel">
+        <h2><span class="no">03</span>损失函数拆解地图</h2>
+        <p>完整的 SFT 损失，可以拆成 <b>5 个环节</b>。下面这张图就是本页的"路线图"，每一环后面都有对应章节：</p>
+
+        <div class="pipeline">
+          <div class="stage c1">
+            <div class="num">①</div>
+            <div class="name">logits</div>
+            <div class="desc">模型最后一层输出：每个候选词一个"原生态分数"</div>
+          </div>
+          <div class="arrow">→</div>
+          <div class="stage c2">
+            <div class="num">②</div>
+            <div class="name">Softmax</div>
+            <div class="desc">把分数变成"预测下一个词"的概率分布</div>
+          </div>
+          <div class="arrow">→</div>
+          <div class="stage c3">
+            <div class="num">③</div>
+            <div class="name">交叉熵</div>
+            <div class="desc">逐个位置衡量"模型猜得有多偏"</div>
+          </div>
+          <div class="arrow">→</div>
+          <div class="stage c4">
+            <div class="num">④</div>
+            <div class="name">掩码</div>
+            <div class="desc">只保留回答部分的损失，指令部分不计</div>
+          </div>
+          <div class="arrow">→</div>
+          <div class="stage c5">
+            <div class="num">⑤</div>
+            <div class="name">聚合</div>
+            <div class="desc">把一个 batch 的所有位置平均，得到最终标量 loss</div>
+          </div>
+        </div>
+
+        <div class="formula dark" style="margin-top:20px">
+          <div class="label">完整 SFT 损失（带掩码、逐 token 交叉熵、批内平均）</div>
+          <div style="font-size:16px;font-weight:600;line-height:2">
+            \[ \mathcal{L}_{\text{SFT}}(\theta) = -\frac{1}{\sum_{(x,y)} m_{x,y}} \sum_{(x,y) \in \mathcal{D}} \sum_{t=1}^{T} m_t \cdot \log p_\theta\!\big(y_t \mid x,\ y_{&lt;t}\big) \]
+          </div>
+          <div style="font-size:12.5px;color:#93c5fd;margin-top:6px">
+            \(m_t \in \{0,1\}\)：掩码，1 表示"该位置计入损失"；\(p_\theta(y_t \mid x, y_{&lt;t})\)：模型在给定前缀下对正确词 \(y_t\) 给出的概率。
+          </div>
+        </div>
+
+        <div class="note info">
+          <span class="t">先记结论：</span>损失小 ⇔ 模型给"正确答案"的概率大。所以 SFT 的本质是——<b>提高标准答案下每个词被选中的概率</b>。接下来每一环都在解释这个"概率"是怎么来的、怎么被衡量的。
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 04 logits ================= -->
+    <section id="s4">
+      <div class="panel">
+        <h2><span class="no">04</span>第一步：logits —— 模型吐出的"原生态分数"</h2>
+        <p>模型内部经过几十层 Transformer 后，最后一层（LM Head，通常是词嵌入的转置）会把当前隐藏状态映射到<strong>词表大小</strong>的向量上：</p>
+
+        <div class="formula">
+          <div class="label">从隐藏状态到 logits</div>
+          \[ \mathbf{z}_t = W_{\text{head}} \, \mathbf{h}_t + \mathbf{b} \in \mathbb{R}^{|\mathcal{V}|} \]
+          <div style="font-size:12.5px;color:#56617a;margin-top:6px">
+            其中 \(|\mathcal{V}|\) 是词表大小（例如 32k 或 128k），\(\mathbf{z}_t\) 的第 \(v\) 个分量 \(z_{t,v}\) 表示"位置 \(t\) 该词 <b>v</b> 应该出现的倾向分数"。
+          </div>
+        </div>
+
+        <h3><span class="dot"></span>logits 的三个直觉</h3>
+        <ul class="clean">
+          <li><b>越大 = 越有可能</b>：\(z_{t,v}\) 大的词，模型认为它更该出现在位置 \(t\)。</li>
+          <li><b>可以是任意实数</b>：logits 不是概率（可能为负、可能大于 1），必须先归一化成概率。</li>
+          <li><b>是"相对"概念</b>：真正决定预测的是词与词之间的<strong>相对差距</strong>，而不是绝对值。Softmax 正是用来放大并归一化这种相对关系的。</li>
+        </ul>
+
+        <div class="note key">
+          <span class="t">类比：</span>logits 就像考试后老师手里还没换算成百分制的<b>原始得分</b>——"这题答得不错、那题一般"；而 Softmax 相当于决定如何把这些原始分"排名并归一化"。
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 05 Softmax ================= -->
+    <section id="s5">
+      <div class="panel">
+        <h2><span class="no">05</span>第二步：Softmax —— 分数如何变成概率</h2>
+        <p>对每个位置 \(t\)，把 logits 向量变成词表上的概率分布（所有词的概率之和为 1）：</p>
+
+        <div class="formula">
+          <div class="label">Softmax 函数</div>
+          \[ p_\theta(v \mid x, y_{&lt;t}) = \frac{e^{z_{t,v}}}{\sum_{v' \in \mathcal{V}} e^{z_{t,v'}}} \qquad \text{满足} \qquad \sum_{v} p_\theta(v) = 1 \]
+        </div>
+
+        <h3><span class="dot"></span>为什么用指数 \(e^{z}\)？</h3>
+        <ul class="clean">
+          <li><b>保证正数</b>：指数函数输出恒为正，天然适合当概率。</li>
+          <li><b>放大差异</b>：指数是指数级放大——logits 差 1，概率比变成 \(e^1 \approx 2.72\) 倍；差 5，变成约 148 倍。这让模型"敢于做出明确的决定"，而不是所有词都五五开。</li>
+          <li><b>可导且平滑</b>：反向传播友好，梯度容易算。</li>
+        </ul>
+
+        <h3><span class="dot"></span>温度 \(T\)：控制分布的"锐利程度"</h3>
+        <div class="formula">
+          <div class="label">带温度 Softmax（\(T\) 越大分布越平、越"糊"；\(T\) 越小越锐利、越"自信"）</div>
+          \[ p_\theta(v) = \frac{e^{z_{t,v} / T}}{\sum_{v'} e^{z_{t,v'} / T}} \]
+        </div>
+        <p class="muted">\(T=1\) 就是普通 Softmax。训练中一般不用温度，但在推理采样时用它控制"发散/保守"程度。下面第 09 节的交互计算器里，你可以亲手拖温度看分布怎么变化。</p>
+      </div>
+    </section>
+
+    <!-- ================= 06 交叉熵 ================= -->
+    <section id="s6">
+      <div class="panel">
+        <h2><span class="no">06</span>第三步：交叉熵 —— 惩罚"猜错"</h2>
+        <p>有了预测概率 \(p_\theta\) 和真实目标，就该"打分"了。真实目标是一个 <b>one-hot</b> 分布 \(p^\*\)：正确词概率为 1，其他词为 0。衡量两个分布差多远，用的就是<strong>交叉熵</strong>：</p>
+
+        <div class="formula">
+          <div class="label">交叉熵定义 → 在 one-hot 目标下化简为负对数似然（NLL）</div>
+          \[
+          \underbrace{-\sum_{v} p^\*(v) \log p_\theta(v)}_{\text{完整交叉熵}}
+          \;=\;
+          -\log p_\theta(y_t)
+          \;\equiv\;
+          \underbrace{-z_{t,y_t} + \log \sum_{v'} e^{z_{t,v'}}}_{\text{Softmax + CrossEntropy 等价形式}}
+          \]
+        </div>
+
+        <h3><span class="dot"></span>为什么这样惩罚"恰到好处"？</h3>
+        <ul class="clean">
+          <li><b>用 \(\log\)，把乘积变求和</b>：整句的概率是每个词概率的连乘。连乘在几十上百个 token 后数值会塌到 0，取对数后变成连加，数值稳定且梯度友好。</li>
+          <li><b>\(\log\) 让"自信地错"惩罚更狠</b>：设正确词概率为 \(p\)，损失是 \(-\log p\)。\(p=0.9\) 时损失约 0.105；\(p=0.1\) 时损失约 2.3，是前者的 <b>22 倍</b>。模型若把答案"背反了"，会收到巨大梯度。</li>
+          <li><b>不惩罚未出现的词</b>：one-hot 目标里其他词的 \(p^\*=0\)，所以交叉熵只关心正确词的概率——其他词"不关它的事"，但也意味着模型对其他词的分布没有任何约束。</li>
+        </ul>
+
+        <h3><span class="dot"></span>为什么不用 MSE？</h3>
+        <div class="note warn">
+          <span class="t">对比：</span>MSE 是对 logits 或概率直接做回归（如 \(\| \mathbf{z}_t - \mathbf{1}_{y_t}\|^2\)）。问题：MSE 对"概率饱和区"（接近 0 或 1）梯度极小，收敛极慢；而且它不尊重分类问题的结构（one-hot 不是向量空间里的连续量）。<b>交叉熵天然对应"最大似然估计"</b>，是分类问题的不二之选。
+        </div>
+
+        <h3><span class="dot"></span>进阶技巧：标签平滑（Label Smoothing）</h3>
+        <p>训练时如果模型的"自信"过于极端（正确词概率冲到 0.999…），容易过拟合。标签平滑把 one-hot 目标"揉软"一点：</p>
+        <div class="formula">
+          <div class="label">标签平滑后的目标分布（\(\epsilon\) 通常取 0.05 ~ 0.1）</div>
+          \[ p^\*(v) = (1 - \epsilon) \cdot \mathbf{1}_{v = y_t} \;+\; \frac{\epsilon}{|\mathcal{V}|} \]
+        </div>
+        <p class="muted">效果：给所有词分一点"希望"，防止模型过度自信、改善泛化。注意它会略微抬高整体损失的下限，所以训练曲线上看到的 loss 会比不平滑时高一些，属正常现象。</p>
+      </div>
+    </section>
+
+    <!-- ================= 07 Teacher Forcing 与掩码 ================= -->
+    <section id="s7">
+      <div class="panel">
+        <h2><span class="no">07</span>第四步：Teacher Forcing 与掩码</h2>
+
+        <h3><span class="dot"></span>Teacher Forcing：预测下一个词时，用"标准答案"做前缀</h3>
+        <p>SFT 训练时，预测位置 \(t\) 的下一个词，用的是<strong>真实的标准答案前缀</strong> \(y_{&lt;t}\)，而不是模型自己上一轮生成的东西。这叫 Teacher Forcing（老师强推）：</p>
+        <div class="formula">
+          <div class="label">Teacher Forcing 下的条件概率（与自回归生成唯一的区别：前缀来自标注，而非模型自产）</div>
+          \[ p_\theta(y_t \mid \underbrace{x, y_{1}, y_{2}, \dots, y_{t-1}}_{\text{来自标注的真实前缀}}) \]
+        </div>
+        <ul class="clean">
+          <li><b>为什么必须这样？</b>如果让模型用自己的输出做前缀（自回归训练），一旦某步出错，后面全都"沿着错误跑偏"，且无法并行计算——每个样本都得串行生成。Teacher Forcing 可以<b>一次前向算出一整句所有位置的损失</b>，训练极快。</li>
+          <li><b>代价：暴露偏差（Exposure Bias）</b>——训练时前缀永远是"标准答案"，但推理时前缀是"模型自己生成的"，两者分布不一致。这是 LLM 训练中的经典 trade-off，主流选择是：训练用 Teacher Forcing，推理用自回归。</li>
+        </ul>
+
+        <h3><span class="dot"></span>掩码（Loss Masking）：只对"回答"算损失</h3>
+        <p>指令部分（\(x\)，即 <code>[INST]...</code>）并不是模型"应该生成"的内容，只是上下文。SFT 不会要求模型去预测指令——所以要用掩码 \(m_t\) 把指令位置的损失<b>清零</b>：</p>
+        <div class="formula">
+          <div class="label">带掩码的逐位置损失（<b>masked mean</b>：只对 mask=1 的位置平均）</div>
+          \[ \mathcal{L} = - \frac{1}{\sum_t m_t} \sum_{t=1}^{T} m_t \cdot \log p_\theta(y_t \mid x, y_{&lt;t}), \qquad m_t = \begin{cases} 1 & \text{回答位置} \\ 0 & \text{指令位置} \end{cases} \]
+        </div>
+        <div class="note key">
+          <span class="t">为什么重要？</span>如果不掩码，模型会把大量精力浪费在"预测用户会问什么"上（这本身不可预测），梯度方向被污染，回答质量下降。<b>掩码让模型集中精力学好"如何作答"。</b>很多开源实现（如 LLaMA-Factory 的 <code>ignore_index=-100</code>）就是靠把指令位置的标签设为 -100 来实现这一点。
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 08 聚合 ================= -->
+    <section id="s8">
+      <div class="panel">
+        <h2><span class="no">08</span>第五步：聚合 —— 平均还是求和？</h2>
+        <p>每个位置都算出交叉熵后，一个样本内、以及一个 batch 内，如何合并成最终损失？这看似小事，其实藏着重要设计考量。</p>
+
+        <div class="formula">
+          <div class="label">两种聚合方式</div>
+          \[
+          \mathcal{L}_{\text{avg}} = -\frac{1}{N}\sum_{t} \log p_\theta(y_t)
+          \qquad\text{vs.}\qquad
+          \mathcal{L}_{\text{sum}} = -\sum_{t} \log p_\theta(y_t)
+          \]
+          <div style="font-size:12.5px;color:#56617a;margin-top:6px">\(N\) 是被计入的位置总数（所有样本的回答 token 数之和）。主流实现（HuggingFace、LLaMA-Factory）用的是 <b>平均</b>。</div>
+        </div>
+
+        <div class="term-grid">
+          <div class="term"><div class="t">求和</div><div class="d">长样本贡献的梯度更大。适合希望模型"认真对待长文本"的场景，但会让 batch 内长样本主导训练。</div></div>
+          <div class="term"><div class="t">平均 = 长度归一化</div><div class="d">每个 token 对梯度贡献相同，长、短样本一视同仁。训练更稳定，是默认选择。</div></div>
+          <div class="term"><div class="t">为什么平均能防"耍滑头"</div><div class="d">若用求和，模型会倾向于生成更长的回答来"积累更少的每 token 惩罚"，导致冗长注水；平均消掉了这个偏向。</div></div>
+          <div class="term"><div class="t">Batch 内平均</div><div class="d">跨样本也平均，损失量级与 batch size、序列长度无关，学习率设置更可移植。</div></div>
+        </div>
+
+        <div class="note info">
+          <span class="t">小结：</span>完整链路 = <b>softmax 概率 → 每个位置算 \(-\log p\) → 指令位置掩码清零 → 所有回答位置平均</b>。到这一步，一个 batch 的标量损失就出来了，接下来就是反向传播更新参数。
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 09 交互式计算器 ================= -->
+    <section id="s9">
+      <div class="panel">
+        <h2><span class="no">09</span>交互式损失计算器</h2>
+        <p>下面用一个小例子，把整条链路<strong>亲手算给你看</strong>。训练样本是：</p>
+        <div class="tpl"><span class="dim">prompt（掩码，不计损失）：</span> 请 介 绍
+<span class="hl2">answer（计损失）：</span> 我 爱 学 习</div>
+        <p class="muted">词表共 10 个词。每个位置会展示：模型预测的概率分布（条形长度 = 概率）、正确词概率、以及该位置（若计入）的交叉熵。拖动下方滑块或切换预设，观察损失如何变化。</p>
+
+        <div class="calc">
+          <div class="calc-bar">
+            <div class="slider-group">
+              <label>预设：</label>
+              <button class="preset-btn active" data-preset="perfect">完美预测</button>
+              <button class="preset-btn" data-preset="medium">中等预测</button>
+              <button class="preset-btn" data-preset="poor">较差预测</button>
+            </div>
+            <div class="slider-group">
+              <label>温度 T</label>
+              <input type="range" id="temp" min="0.3" max="3" step="0.1" value="1">
+              <span class="slider-val" id="tempVal">1.0</span>
+            </div>
+            <div class="slider-group">
+              <label>标签平滑 ε</label>
+              <input type="range" id="smooth" min="0" max="0.3" step="0.01" value="0">
+              <span class="slider-val" id="smoothVal">0.00</span>
+            </div>
+          </div>
+
+          <div class="seq" id="seq"></div>
+          <div id="positions"></div>
+
+          <div class="summary" id="summary"></div>
+        </div>
+
+        <div class="note info" style="margin-top:16px">
+          <span class="t">动手试试：</span>把温度拖到 3，观察"较差预测"下概率分布如何被"抹平"、损失如何下降——这正是推理采样时"温度越高输出越随机"的原因；再把标签平滑拉到 0.1，注意平均损失整体抬高，这正是标签平滑防止过拟合付出的"代价"。
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 10 训练细节与梯度直觉 ================= -->
+    <section id="s10">
+      <div class="panel">
+        <h2><span class="no">10</span>训练细节与梯度直觉</h2>
+
+        <h3><span class="dot"></span>SFT 的梯度到底在更新什么？</h3>
+        <p>交叉熵对 logits 的梯度有一个非常优美的形式：</p>
+        <div class="formula">
+          <div class="label">交叉熵对 logits 的梯度（惊人地简单）</div>
+          \[ \frac{\partial \mathcal{L}_t}{\partial z_{t,v}} = p_\theta(v \mid x, y_{&lt;t}) - p^\*(v) = \underbrace{p_\theta(v)}_{\text{模型当前认为}} - \underbrace{\mathbf{1}_{v = y_t}}_{\text{正确答案}} \]
+        </div>
+        <ul class="clean">
+          <li><b>直觉：</b>如果模型高估了正确词（\(p_\theta(y_t) &gt; 1\) 不可能，所以实际是高估了其他词 / 低估了正确词），梯度会推动 logits 朝"增加正确词、压低其他词"的方向走。</li>
+          <li><b>当且仅当</b>预测概率等于 one-hot 目标时梯度为 0 —— 也就是模型"完全确定"了正确答案。这也是为什么训练末尾 loss 逼近 0 而梯度变小。</li>
+          <li>由于梯度正比于"预测残差 \(p_\theta - p^\*\)"，<b>错误越离谱、梯度越大、被纠正得越狠</b>——自动实现了"重点补差"。</li>
+        </ul>
+
+        <h3><span class="dot"></span>SFT 训练的标准配置</h3>
+        <div class="tbl-wrap">
+          <table>
+            <thead>
+              <tr><th>超参数</th><th>典型取值</th><th>说明</th></tr>
+            </thead>
+            <tbody>
+              <tr><td class="row-name">学习率</td><td>1e-5 ~ 2e-5（全参）</td><td>比预训练小 1~2 个数量级，防止破坏已有知识。</td></tr>
+              <tr><td class="row-name">Epochs</td><td>2 ~ 3</td><td>SFT 数据少，1-2 轮内极易过拟合，需要早停。</td></tr>
+              <tr><td class="row-name">序列长度</td><td>2048 ~ 8192</td><td>长上下文任务（代码/长文）需要更大的 max length。</td></tr>
+              <tr><td class="row-name">批大小</td><td>等效 64 ~ 512 样本</td><td>用梯度累积实现大 batch，稳定收敛。</td></tr>
+              <tr><td class="row-name">优化器</td><td>AdamW / AdamW-8bit</td><td>带 weight decay，配合 warmup 学习率。</td></tr>
+              <tr><td class="row-name">精度</td><td>bf16 / fp16</td><td>低精度训练省显存；LoRA/QLoRA 可进一步降资源。</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="muted">LoRA/QLoRA：冻结大部分参数、只训练低秩适配器，SFT 阶段的显存和成本可降低一个数量级，是消费级 GPU 微调的标准做法。</p>
+      </div>
+    </section>
+
+    <!-- ================= 11 常见坑 ================= -->
+    <section id="s11">
+      <div class="panel">
+        <h2><span class="no">11</span>常见坑与技巧</h2>
+        <div class="tbl-wrap">
+          <table>
+            <thead>
+              <tr><th>现象 / 诉求</th><th>原因</th><th>对策</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="row-name">Loss 一开始不降，还往上跳</td>
+                <td>学习率过大，或数据混入了大量异常格式样本</td>
+                <td>调小学习率；检查数据是否把 prompt 也算进了标签</td>
+              </tr>
+              <tr>
+                <td class="row-name">Loss 降得很快但生成还是胡言乱语</td>
+                <td>数据质量差（答案错误、风格混乱）；或过拟合训练集</td>
+                <td>清洗数据；做 hold-out 验证集观察真实 loss 与困惑度</td>
+              </tr>
+              <tr>
+                <td class="row-name">微调后忘记原任务（灾难性遗忘）</td>
+                <td>SFT 只用任务数据，覆盖了预训练分布</td>
+                <td>混合少量通用语料；降低学习率；控制训练轮数</td>
+              </tr>
+              <tr>
+                <td class="row-name">回答变长注水、爱说废话</td>
+                <td>损失用求和而非平均 / 数据本身偏向长回答</td>
+                <td>改用 masked mean；检查标注回答是否存在系统性冗长</td>
+              </tr>
+              <tr>
+                <td class="row-name">同一条指令数据重复过多</td>
+                <td>单一模板过度采样，模型只会"背答案"</td>
+                <td>数据去重、模板多样化（改写指令措辞）</td>
+              </tr>
+              <tr>
+                <td class="row-name">训练损失不高但评估差</td>
+                <td>评估指标与 SFT 目标不一致（SFT 只优化似然）</td>
+                <td>用真实性、有用性等下游指标评估；必要时接 RL 阶段</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="note warn">
+          <span class="t">最重要的一条：</span>SFT 的 loss 很小 <b>≠</b> 模型很好。损失只衡量"是否模仿了标注答案"，它无法衡量"答案是否真的正确、有用、安全"——这正是后面要接<b>奖励模型与强化学习</b>的根本原因。
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 12 对比 ================= -->
+    <section id="s12">
+      <div class="panel">
+        <h2><span class="no">12</span>SFT 与其他训练阶段对比</h2>
+        <div class="tbl-wrap">
+          <table>
+            <thead>
+              <tr><th>维度</th><th>预训练</th><th>SFT 监督微调</th><th>RL（PPO/GRPO）</th><th>DPO 偏好优化</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="row-name">数据</td>
+                <td>海量无标注文本（自监督）</td>
+                <td>少量高质量指令-回答对</td>
+                <td>在线采样 + 奖励信号</td>
+                <td>离线偏好对（好/坏）</td>
+              </tr>
+              <tr>
+                <td class="row-name">训练目标</td>
+                <td>预测下一个 token</td>
+                <td>最大化标准回答的似然</td>
+                <td>最大化（奖励 − KL 惩罚）</td>
+                <td>最大化好回答对坏回答的隐式间隔</td>
+              </tr>
+              <tr>
+                <td class="row-name">是否用标准答案</td>
+                <td>否</td>
+                <td class="check">是（逐 token 监督）</td>
+                <td class="cross">否（只有分数）</td>
+                <td>是（但只是偏序）</td>
+              </tr>
+              <tr>
+                <td class="row-name">能否自我探索</td>
+                <td>否</td>
+                <td class="cross">否（纯模仿）</td>
+                <td class="check">能（在线试错）</td>
+                <td class="cross">否（离线）</td>
+              </tr>
+              <tr>
+                <td class="row-name">训练成本</td>
+                <td>极高</td>
+                <td>低</td>
+                <td>高</td>
+                <td>低</td>
+              </tr>
+              <tr>
+                <td class="row-name">典型输出能力</td>
+                <td>语言能力</td>
+                <td>指令跟随、对话风格</td>
+                <td>偏好对齐、强推理</td>
+                <td>偏好对齐（近似 RL）</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="note key" style="margin-top:18px">
+          <span class="t">一句话总结全页：</span>SFT 的损失函数 = <b>对标准答案做带掩码的交叉熵平均</b>。它让模型学会"照着高质量答案说话"；但它的天花板是"标注数据的天花板"——想要超越数据、学会自我优化，就必须进入强化学习阶段（详见配套页《从 SFT 到强化学习算法》）。
+        </div>
+
+        <div class="formula dark" style="margin-top:16px">
+          <div class="label">记忆公式</div>
+          <div style="font-size:16px;font-weight:600;line-height:1.9">
+            logits 分数 → <span style="color:#67e8f9">Softmax 变概率</span> → <span style="color:#a7f3d0">\(-\log p\) 交叉熵</span> → <span style="color:#fda4af">掩码只看回答</span> → <span style="color:#c4b5fd">平均成标量</span>
+          </div>
+        </div>
+
+        <div class="end-note">
+          本页为图解学习笔记 · 关键词：SFT · 交叉熵 · NLL · Teacher Forcing · Loss Masking · 标签平滑 · 长度归一化
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+/* ================= 交互式损失计算器 ================= */
+(function () {
+  const V = ["请", "介", "绍", "我", "爱", "学", "习", "好", "的", "<pad>"];
+  // 序列：请 介 绍 (prompt, mask=0) | 我 爱 学 习 (answer, mask=1)
+  const target = [0, 1, 2, 3, 4, 2, 5];
+  const mask   = [0, 0, 0, 1, 1, 1, 1];
+  const ROLE = ["指令", "指令", "指令", "回答", "回答", "回答", "回答"];
+
+  // 三组预设 logits：每行 = 该位置的 10 个词分数
+  const PRESETS = {
+    perfect: [
+      [6,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1],
+      [0.1,6,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1],
+      [0.1,0.1,6,0.1,0.1,0.1,0.1,0.1,0.1,0.1],
+      [0.1,0.1,0.1,6,0.1,0.1,0.1,0.1,0.1,0.1],
+      [0.1,0.1,0.1,0.1,6,0.1,0.1,0.1,0.1,0.1],
+      [0.1,0.1,0.1,0.1,0.1,6,0.1,0.1,0.1,0.1],
+      [0.1,0.1,0.1,0.1,0.1,0.1,6,0.1,0.1,0.1]
+    ],
+    medium: [
+      [0.2,0.2,0.2,2.5,1.2,1.5,1.0,0.8,0.5,0.1],
+      [0.2,0.2,0.2,1.4,2.5,0.6,0.9,1.1,0.3,0.1],
+      [0.2,0.2,0.2,0.7,1.0,2.5,1.6,0.4,0.2,0.1],
+      [0.2,0.2,0.2,0.6,0.9,0.5,2.5,0.3,0.2,0.1],
+      [0.2,0.2,0.2,0.7,1.0,0.6,0.9,0.3,0.2,0.1],
+      [0.2,0.2,0.2,0.8,0.7,1.0,1.2,0.4,0.2,0.1],
+      [0.2,0.2,0.2,0.9,0.4,1.2,2.5,0.2,0.1,0.1]
+    ],
+    poor: [
+      [0.1,0.1,0.1,-0.5,0.2,0.1,0.2,3.0,0.2,0.1],
+      [0.1,0.1,0.1,0.3,-0.5,0.2,0.3,0.2,2.8,0.1],
+      [0.1,0.1,0.1,0.2,0.3,-0.5,2.8,0.1,0.2,0.1],
+      [0.1,0.1,0.1,0.3,0.2,2.6,-0.5,0.2,0.1,0.1],
+      [0.1,0.1,0.1,0.4,0.3,0.2,0.1,-0.5,2.5,0.1],
+      [0.1,0.1,0.1,0.3,0.5,-0.5,0.4,0.2,0.1,2.4],
+      [0.1,0.1,0.1,0.5,0.2,2.6,-0.5,0.1,0.2,0.1]
+    ]
+  };
+
+  let curPreset = "perfect";
+
+  const seqEl = document.getElementById("seq");
+  const posEl = document.getElementById("positions");
+  const sumEl = document.getElementById("summary");
+  const tempIn = document.getElementById("temp");
+  const tempVal = document.getElementById("tempVal");
+  const smoothIn = document.getElementById("smooth");
+  const smoothVal = document.getElementById("smoothVal");
+
+  function renderSeq() {
+    seqEl.innerHTML = "";
+    target.forEach((tid, i) => {
+      const d = document.createElement("div");
+      d.className = "tok" + (mask[i] ? " ans" : " mask");
+      d.innerHTML = `<div class="w">${V[tid]}</div><div class="role">${ROLE[i]} · t=${i}</div>`;
+      seqEl.appendChild(d);
+    });
+  }
+
+  function softmax(arr, T) {
+    const max = Math.max(...arr);
+    const ex = arr.map(z => Math.exp((z - max) / T));
+    const s = ex.reduce((a, b) => a + b, 0);
+    return ex.map(e => e / s);
+  }
+
+  function render() {
+    const T = parseFloat(tempIn.value);
+    const eps = parseFloat(smoothIn.value);
+    tempVal.textContent = T.toFixed(1);
+    smoothVal.textContent = eps.toFixed(2);
+
+    const logits = PRESETS[curPreset];
+    let sumCE = 0, nMasked = 0, sumCETotal = 0;
+    let correctProbSum = 0, correctProbCount = 0;
+
+    let html = "";
+    logits.forEach((row, i) => {
+      const probs = softmax(row, T);
+      const isMask = mask[i] === 1;
+      const gt = target[i];
+
+      // 目标分布：one-hot 或标签平滑
+      let ce = 0;
+      probs.forEach((p, v) => {
+        const pstar = (v === gt) ? (1 - eps) + eps / V.length : eps / V.length;
+        ce += pstar * (-Math.log(Math.max(p, 1e-12)));
+      });
+
+      if (isMask) {
+        sumCE += ce;
+        nMasked++;
+        correctProbSum += probs[gt];
+        correctProbCount++;
+      }
+      sumCETotal += ce;
+
+      const ceLabel = isMask ? `CE = ${ce.toFixed(3)}` : "不计损失";
+      const ceClass = isMask ? "live" : "muted-ce";
+
+      html += `<div class="pos">
+        <div class="pos-head">
+          <span class="idx">t=${i}</span>
+          <span class="tgt">目标词：<span class="star">★</span> ${V[gt]}</span>
+          ${isMask ? `<span class="ce ${ceClass}">${ceLabel}</span>` : `<span class="mask-tag">${ceLabel}</span>`}
+        </div>`;
+
+      V.forEach((w, v) => {
+        const p = probs[v];
+        const isGT = (v === gt);
+        const pct = (p * 100).toFixed(1);
+        html += `<div class="bar-row">
+          <span class="w ${isGT ? "correct" : ""}">${w}${isGT ? "★" : ""}</span>
+          <div class="bar-track"><div class="bar-fill ${isGT ? "correct" : ""}" style="width:${Math.min(p * 100, 100)}%"></div></div>
+          <span class="p">${pct}%</span>
+        </div>`;
+      });
+      html += `</div>`;
+    });
+    posEl.innerHTML = html;
+
+    const avgMasked = sumCE / Math.max(nMasked, 1);
+    const avgTotal = sumCETotal / logits.length;
+    const correctAvg = correctProbSum / Math.max(correctProbCount, 1);
+
+    sumEl.innerHTML = `
+      <div class="sum-card main">
+        <div class="k">SFT 损失（掩码平均）</div>
+        <div class="v">${avgMasked.toFixed(4)}</div>
+        <div class="note-txt">只对回答的 ${nMasked} 个位置平均</div>
+      </div>
+      <div class="sum-card">
+        <div class="k">全序列平均</div>
+        <div class="v">${avgTotal.toFixed(4)}</div>
+        <div class="note-txt">含指令位置（通常更高/更低皆可能）</div>
+      </div>
+      <div class="sum-card">
+        <div class="k">正确词平均概率</div>
+        <div class="v" style="color:${correctAvg > 0.8 ? "var(--green)" : correctAvg > 0.5 ? "var(--amber)" : "var(--rose)"}">${(correctAvg * 100).toFixed(1)}%</div>
+        <div class="note-txt">回答位置上"答对"的平均信心</div>
+      </div>`;
+  }
+
+  document.querySelectorAll(".preset-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      curPreset = btn.dataset.preset;
+      render();
+    });
+  });
+  tempIn.addEventListener("input", render);
+  smoothIn.addEventListener("input", render);
+
+  renderSeq();
+  render();
+})();
+</script>
+</body>
+</html>

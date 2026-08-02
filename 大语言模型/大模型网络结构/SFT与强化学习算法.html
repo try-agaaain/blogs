@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SFT 与强化学习算法 · 从监督微调到 RLHF</title>
+<script>
+window.MathJax = {
+  tex: {
+    inlineMath: [['\\(', '\\)']],
+    displayMath: [['\\[', '\\]']]
+  },
+  svg: { fontCache: 'global' }
+};
+</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+<style>
+:root {
+  --bg: #f6f7fb;
+  --panel: #ffffff;
+  --ink: #1b2330;
+  --ink-2: #56617a;
+  --line: #e4e8f0;
+  --primary: #4f46e5;
+  --primary-2: #7c3aed;
+  --accent: #06b6d4;
+  --green: #10b981;
+  --amber: #f59e0b;
+  --rose: #f43f5e;
+  --radius: 16px;
+  --shadow: 0 1px 2px rgba(27,35,48,.06), 0 8px 24px rgba(27,35,48,.06);
+  --sidebar-w: 264px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 90px; }
+body {
+  font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  line-height: 1.75;
+  font-size: 15px;
+}
+::selection { background: rgba(79,70,229,.18); }
+
+/* ---------- 顶部 Hero ---------- */
+.hero {
+  position: relative;
+  padding: 56px 40px 40px;
+  background:
+    radial-gradient(900px 340px at 15% -10%, rgba(124,58,237,.20), transparent 60%),
+    radial-gradient(800px 300px at 90% 0%, rgba(6,182,212,.16), transparent 60%),
+    linear-gradient(135deg, #141a2e 0%, #1b2336 60%, #232a45 100%);
+  color: #f4f6ff;
+}
+.hero .wrap { max-width: 1060px; margin: 0 auto; }
+.hero .tag {
+  display: inline-block;
+  font-size: 12px;
+  letter-spacing: .12em;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.10);
+  border: 1px solid rgba(255,255,255,.18);
+  color: #c9d4ff;
+  margin-bottom: 16px;
+}
+.hero h1 { font-size: 34px; font-weight: 800; letter-spacing: .5px; line-height: 1.3; }
+.hero h1 .grad {
+  background: linear-gradient(90deg, #93c5fd, #c4b5fd, #67e8f9);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.hero p.sub { margin-top: 14px; color: #b9c2e0; max-width: 760px; font-size: 15px; }
+.hero .meta { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 10px; }
+.hero .chip {
+  font-size: 12px; color: #dfe6ff;
+  background: rgba(255,255,255,.08);
+  border: 1px solid rgba(255,255,255,.14);
+  padding: 4px 12px; border-radius: 999px;
+}
+
+/* ---------- 布局 ---------- */
+.layout { max-width: 1280px; margin: 0 auto; display: flex; gap: 28px; padding: 0 24px; }
+.sidebar {
+  width: var(--sidebar-w);
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 24px 8px 24px 0;
+}
+.sidebar .toc-title { font-size: 12px; letter-spacing: .1em; color: var(--ink-2); font-weight: 700; margin: 8px 0 10px; padding-left: 12px; }
+.sidebar a {
+  display: block;
+  padding: 7px 12px;
+  border-radius: 10px;
+  color: var(--ink-2);
+  text-decoration: none;
+  font-size: 13.5px;
+  border-left: 3px solid transparent;
+  transition: all .18s ease;
+}
+.sidebar a:hover { background: #edf0fa; color: var(--ink); }
+.sidebar a.active {
+  background: linear-gradient(90deg, rgba(79,70,229,.12), rgba(79,70,229,.03));
+  color: var(--primary);
+  border-left-color: var(--primary);
+  font-weight: 600;
+}
+main { flex: 1; min-width: 0; max-width: 860px; padding: 28px 0 90px; }
+
+/* ---------- 通用区块 ---------- */
+section { margin-bottom: 22px; }
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 28px 30px;
+  margin-bottom: 22px;
+}
+h2 {
+  font-size: 22px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+  letter-spacing: .3px;
+}
+h2 .no {
+  font-size: 13px;
+  font-weight: 800;
+  color: #fff;
+  background: linear-gradient(135deg, var(--primary), var(--primary-2));
+  width: 28px; height: 28px;
+  border-radius: 9px;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+h3 { font-size: 16.5px; font-weight: 700; margin: 26px 0 10px; display: flex; align-items: center; gap: 8px; }
+h3 .dot { width: 8px; height: 8px; border-radius: 50%; background: linear-gradient(135deg, var(--primary), var(--primary-2)); flex-shrink: 0; }
+p { color: var(--ink); margin: 10px 0; }
+.muted { color: var(--ink-2); }
+b, strong { color: #141b2d; }
+
+/* 公式卡片 */
+.formula {
+  background: linear-gradient(180deg, #f8f7ff, #f3f1ff);
+  border: 1px solid #e2dcff;
+  border-left: 4px solid var(--primary);
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin: 14px 0;
+  overflow-x: auto;
+}
+.formula .label { font-size: 12px; color: var(--primary); font-weight: 700; letter-spacing: .06em; margin-bottom: 6px; }
+.formula mjx-container { display: block; }
+
+/* 说明块 */
+.note {
+  border-radius: 12px;
+  padding: 14px 18px;
+  margin: 14px 0;
+  font-size: 14px;
+  border: 1px solid;
+}
+.note.info { background: #eef6ff; border-color: #cfe4fb; color: #15529c; }
+.note.warn { background: #fff7ec; border-color: #fadcae; color: #92500b; }
+.note.key { background: #f1fdf7; border-color: #bfead6; color: #0e7a4d; }
+.note .t { font-weight: 700; margin-right: 6px; }
+
+/* 列表 */
+ul.clean { margin: 8px 0 8px 4px; list-style: none; }
+ul.clean li { position: relative; padding-left: 22px; margin: 7px 0; }
+ul.clean li::before {
+  content: "";
+  position: absolute; left: 4px; top: 10px;
+  width: 7px; height: 7px; border-radius: 2px;
+  background: linear-gradient(135deg, var(--primary), var(--primary-2));
+  transform: rotate(45deg);
+}
+
+/* ---------- 流程图 ---------- */
+.pipeline { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; margin: 18px 0 6px; }
+.stage {
+  flex: 1;
+  min-width: 160px;
+  border-radius: 14px;
+  padding: 14px 14px 16px;
+  text-align: center;
+  position: relative;
+  background: #fff;
+  border: 2px solid var(--line);
+  transition: transform .2s ease, box-shadow .2s ease;
+}
+.stage:hover { transform: translateY(-4px); box-shadow: var(--shadow); }
+.stage .num {
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: #fff; font-weight: 800; font-size: 13px;
+  margin-bottom: 8px;
+}
+.stage .name { font-weight: 700; font-size: 15px; }
+.stage .desc { font-size: 12.5px; color: var(--ink-2); margin-top: 6px; line-height: 1.55; }
+.stage .tag { display: inline-block; margin-top: 8px; font-size: 11px; padding: 2px 10px; border-radius: 999px; font-weight: 700; }
+.stage.c1 { border-color: #c7d2fe; }
+.stage.c1 .num, .stage.c1 .tag { background: #6366f1; }
+.stage.c1 .tag { color: #4338ca; background: #e0e7ff; }
+.stage.c2 { border-color: #a5f3fc; }
+.stage.c2 .num, .stage.c2 .tag { background: #06b6d4; }
+.stage.c2 .tag { color: #0e7490; background: #cffafe; }
+.stage.c3 { border-color: #a7f3d0; }
+.stage.c3 .num, .stage.c3 .tag { background: #10b981; }
+.stage.c3 .tag { color: #047857; background: #d1fae5; }
+.stage.c4 { border-color: #fde68a; }
+.stage.c4 .num, .stage.c4 .tag { background: #f59e0b; }
+.stage.c4 .tag { color: #b45309; background: #fef3c7; }
+.stage.c5 { border-color: #fbcfe8; }
+.stage.c5 .num, .stage.c5 .tag { background: #ec4899; }
+.stage.c5 .tag { color: #be185d; background: #fce7f3; }
+.stage.hot { animation: pulse 2s infinite; }
+@keyframes pulse {
+  0%,100% { box-shadow: 0 0 0 0 rgba(236,72,153,.35); }
+  50% { box-shadow: 0 0 0 10px rgba(236,72,153,0); }
+}
+.arrow { align-self: center; font-size: 22px; color: #a3aec6; padding: 0 4px; font-weight: 700; flex-shrink: 0; }
+.arrow-label { align-self: center; font-size: 11px; color: var(--ink-2); writing-mode: vertical-lr; letter-spacing: .08em; }
+
+/* ---------- Tab 算法卡 ---------- */
+.tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 14px; }
+.tab {
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 8px 16px;
+  border-radius: 999px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: all .18s ease;
+}
+.tab:hover { border-color: var(--primary); color: var(--primary); }
+.tab.active {
+  background: linear-gradient(135deg, var(--primary), var(--primary-2));
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 6px 16px rgba(79,70,229,.30);
+}
+.tabpane { display: none; }
+.tabpane.active { display: block; animation: fadein .35s ease; }
+@keyframes fadein { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+.alg-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.alg-head h4 { font-size: 19px; font-weight: 800; }
+.badge { font-size: 11.5px; font-weight: 700; padding: 3px 11px; border-radius: 999px; }
+.badge.core { background: #fce7f3; color: #be185d; }
+.badge.alt { background: #e0e7ff; color: #4338ca; }
+
+/* 特性网格 */
+.pros-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin: 16px 0; }
+.pros-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: #fbfcff;
+}
+.pros-card .k { font-size: 12px; font-weight: 800; letter-spacing: .05em; color: var(--ink-2); margin-bottom: 4px; }
+.pros-card .v { font-size: 13.5px; color: var(--ink); }
+.pros-card .v.good { color: #0e7a4d; }
+.pros-card .v.bad { color: #be185d; }
+
+/* ---------- 对比表格 ---------- */
+.tbl-wrap { overflow-x: auto; margin: 16px 0; border-radius: 12px; border: 1px solid var(--line); }
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; min-width: 720px; }
+thead th {
+  background: linear-gradient(135deg, #1d2440, #262f52);
+  color: #e8ecff;
+  padding: 12px 14px;
+  text-align: left;
+  font-weight: 700;
+  white-space: nowrap;
+}
+tbody td { padding: 11px 14px; border-top: 1px solid var(--line); vertical-align: top; color: var(--ink); }
+tbody tr:nth-child(even) { background: #f8f9fd; }
+tbody tr:hover { background: #eef1fd; }
+td.row-name { font-weight: 700; color: #2c3350; white-space: nowrap; }
+.center { text-align: center; }
+.check { color: var(--green); font-weight: 800; }
+.cross { color: var(--rose); font-weight: 800; }
+
+/* ---------- 术语表 ---------- */
+.term-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 14px 0; }
+.term {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 12px;
+  padding: 12px 16px;
+  background: #fff;
+}
+.term .t { font-weight: 700; font-size: 14px; color: #0e7490; }
+.term .d { font-size: 12.5px; color: var(--ink-2); margin-top: 4px; line-height: 1.6; }
+
+/* 结尾 */
+.end-note {
+  text-align: center;
+  color: var(--ink-2);
+  font-size: 13px;
+  padding: 26px 0 10px;
+}
+
+/* 移动端 */
+@media (max-width: 980px) {
+  .sidebar { display: none; }
+  .hero { padding: 40px 24px; }
+  .hero h1 { font-size: 26px; }
+  .layout { padding: 0 16px; }
+  .panel { padding: 22px 20px; }
+  .pipeline { flex-direction: column; }
+  .arrow { transform: rotate(90deg); align-self: center; }
+  .arrow-label { writing-mode: horizontal-tb; }
+}
+</style>
+</head>
+<body>
+
+<!-- ================= Hero ================= -->
+<header class="hero">
+  <div class="wrap">
+    <span class="tag">大模型训练管线 · 图解笔记</span>
+    <h1>从 <span class="grad">SFT 监督微调</span> 到 <span class="grad">强化学习对齐</span></h1>
+    <p class="sub">一文理清 PPO / GRPO / DPO 等强化学习算法的来龙去脉：它们解决什么问题、各自的训练目标、优缺点，以及在 LLM 对齐中该如何选择。</p>
+    <div class="meta">
+      <span class="chip">RLHF</span>
+      <span class="chip">PPO · GRPO · DPO</span>
+      <span class="chip">KL 散度约束</span>
+      <span class="chip">策略梯度</span>
+    </div>
+  </div>
+</header>
+
+<div class="layout">
+  <!-- ================= 侧边导航 ================= -->
+  <nav class="sidebar">
+    <div class="toc-title">目录</div>
+    <a href="#s1">01 · 为什么 SFT 还不够</a>
+    <a href="#s2">02 · 从 SFT 到 RLHF 的四步</a>
+    <a href="#s3">03 · RL 核心概念速览</a>
+    <a href="#s4">04 · PPO 详解</a>
+    <a href="#s5">05 · GRPO 详解</a>
+    <a href="#s6">06 · DPO 详解</a>
+    <a href="#s7">07 · 其他算法（RLOO/KTO/ORPO）</a>
+    <a href="#s8">08 · 算法全景对比</a>
+    <a href="#s9">09 · 实践选型建议</a>
+  </nav>
+
+  <main>
+    <!-- ================= 1. 为什么 SFT 不够 ================= -->
+    <section id="s1">
+      <div class="panel">
+        <h2><span class="no">01</span>为什么 SFT 还不够？</h2>
+        <p><b>SFT（Supervised Fine-Tuning，监督微调）</b>是用人工标注的高质量「指令-回答」对，对预训练大模型做有监督交叉熵训练，让模型学会"像人一样回答"。它的训练目标很简单：</p>
+        <div class="formula">
+          <div class="label">SFT 训练目标（最大化答案的对数似然）</div>
+          \[ \mathcal{L}_{\text{SFT}}(\theta) = - \mathbb{E}_{(x, y) \sim \mathcal{D}} \Big[ \sum_{t} \log p_\theta(y_t \mid x, y_{&lt;t}) \Big] \]
+        </div>
+        <p class="muted">模型只要"照着抄"标注数据，回答得越像标注越好，并不关心结果是否真的被用户喜欢。</p>
+
+        <h3><span class="dot"></span>SFT 的三个局限</h3>
+        <ul class="clean">
+          <li><b>只会模仿，不会优化</b>：SFT 是回归式的模仿学习，模型从未见过"惩罚"，因此无法学会主动放弃差回答、追求更好结果。</li>
+          <li><b>缺乏对"偏好"的建模</b>：标注数据通常是单条的，无法表达"回答 A 比回答 B 好多少"，难以对齐人类的主观偏好。</li>
+          <li><b>难以处理长程推理</b>：每一步生成都按交叉熵监督，缺少对整个回答"好坏"的全局信号，复杂任务（数学、代码）容易半途而废。</li>
+        </ul>
+
+        <div class="note key">
+          <span class="t">核心认知：</span>SFT 解决"模型会说人话"，强化学习解决"模型把话说好"——它用<strong>奖励信号</strong>告诉模型什么是对的，再让模型自己去探索如何最大化奖励，这是 SFT 做不到的。
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 2. 四步流程 ================= -->
+    <section id="s2">
+      <div class="panel">
+        <h2><span class="no">02</span>从 SFT 到 RLHF 的完整链路</h2>
+        <p>业界主流的大模型对齐流程（OpenAI 的 InstructGPT 范式）通常是下面五步。我们今天的主角——强化学习，是其中的第 ④ 步：</p>
+
+        <div class="pipeline">
+          <div class="stage c1">
+            <div class="num">1</div>
+            <div class="name">预训练</div>
+            <div class="desc">在海量文本上学习语言规律，得到「会说」的底座模型</div>
+            <span class="tag">无监督</span>
+          </div>
+          <div class="arrow">→</div>
+          <div class="stage c2">
+            <div class="num">2</div>
+            <div class="name">SFT 监督微调</div>
+            <div class="desc">用标注问答对微调，模型学会「按指令回答」</div>
+            <span class="tag">有监督</span>
+          </div>
+          <div class="arrow">→</div>
+          <div class="stage c3">
+            <div class="num">3</div>
+            <div class="name">奖励模型 RM</div>
+            <div class="desc">用人类偏好数据训练打分器，衡量回答好坏</div>
+            <span class="tag">偏好学习</span>
+          </div>
+          <div class="arrow">→</div>
+          <div class="stage c4 hot">
+            <div class="num">4</div>
+            <div class="name">强化学习 RL</div>
+            <div class="desc">用 PPO / GRPO 等算法微调，最大化奖励</div>
+            <span class="tag">RL 算法</span>
+          </div>
+          <div class="arrow">→</div>
+          <div class="stage c5">
+            <div class="num">5</div>
+            <div class="name">部署</div>
+            <div class="desc">对齐后的模型上线服务用户</div>
+            <span class="tag">推理</span>
+          </div>
+        </div>
+
+        <h3><span class="dot"></span>关键：RM 给 RL 提供「老师」</h3>
+        <p>奖励模型（Reward Model）通过对回答对 <b>\(y_w \succ y_l\)</b>（好回答胜于差回答）的偏好数据进行二分类训练，学会给任意回答打一个标量分数 \(r_\theta(x, y)\)。RL 阶段就靠这个分数当"反馈信号"。</p>
+        <div class="formula">
+          <div class="label">奖励模型训练目标（Bradley–Terry 偏好模型）</div>
+          \[ \mathcal{L}_{\text{RM}} = - \mathbb{E}_{(x, y_w, y_l)} \Big[ \log \sigma\big( r_\theta(x, y_w) - r_\theta(x, y_l) \big) \Big] \]
+        </div>
+        <div class="note info">
+          <span class="t">提示：</span>很多新一代方法（DPO / GRPO）不再单独训练 RM，而是<strong>绕过 RM</strong> 直接用偏好数据或组内相对分数优化策略，这就是后面要讲的"无 RM 流派"。
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 3. RL 核心概念 ================= -->
+    <section id="s3">
+      <div class="panel">
+        <h2><span class="no">03</span>强化学习核心概念速览</h2>
+        <p>把语言生成看成一个序贯决策过程：模型每生成一个 token，就是做出一次「动作」，之前生成的内容是「状态」，RM 的打分是「奖励」。先建立这些基础术语：</p>
+
+        <div class="term-grid">
+          <div class="term"><div class="t">策略 \(\pi_\theta(a \mid s)\)</div><div class="d">模型本身。给定当前序列（状态）预测下一个 token（动作）的概率分布，\(\theta\) 是要优化的参数。</div></div>
+          <div class="term"><div class="t">状态 \(s\) / 动作 \(a\)</div><div class="d">状态 = 已生成的 token 序列；动作 = 选下一个 token。整条序列组成一条「轨迹」。</div></div>
+          <div class="term"><div class="t">奖励 \(r\)</div><div class="d">对单步或整段回答的打分。LLM 中通常只在序列末尾给一个整句分数 \(R(x,y)\)。</div></div>
+          <div class="term"><div class="t">回报 \(G_t\)</div><div class="d">从 t 时刻起累计的（折扣）奖励总和。它告诉我们"这一步决策到底值多少"。</div></div>
+          <div class="term"><div class="t">优势函数 \(A(s,a)\)</div><div class="d">"这一步比平均好多少"：\(A = Q(s,a) - V(s)\)。是策略梯度算法的核心，越大说明该动作越值得强化。</div></div>
+          <div class="term"><div class="t">KL 散度 \(\mathrm{KL}\)</div><div class="d">衡量当前策略与参考策略（通常是 SFT 模型）的差异。RL 时要加惩罚项，防止模型"奖励黑客"式地乱说话。</div></div>
+          <div class="term"><div class="t">策略梯度</div><div class="d">通过「好动作提概率、差动作降概率」的方向更新：\(\nabla_\theta J = \mathbb{E}[A \cdot \nabla_\theta \log \pi_\theta]\)。</div></div>
+          <div class="term"><div class="t">参考策略 \(\pi_{\text{ref}}\)</div><div class="d">RL 开始前的 SFT 基线模型。KL 惩罚项就是让新策略不要偏离它太远。</div></div>
+        </div>
+
+        <div class="note warn">
+          <span class="t">为什么必须加 KL 惩罚？</span>如果只最大化奖励，模型会钻空子——输出一堆冗长、奉承、甚至乱码来"骗高分"（奖励黑客，Reward Hacking）。加上 <b>\(- \beta \cdot \mathrm{KL}(\pi_\theta \| \pi_{\text{ref}})\)</b> 项后，模型必须在"高分"与"不偏离常识"之间取得平衡。
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 4. PPO ================= -->
+    <section id="s4">
+      <div class="panel">
+        <h2><span class="no">04</span>PPO · 强化学习的"标准答案"</h2>
+        <p><b>PPO（Proximal Policy Optimization，近端策略优化）</b>由 OpenAI 提出，是 InstructGPT 的默认算法，也是 RLHF 最经典的实现。它属于<strong>在线策略 + 值函数</strong>一派的代表。</p>
+
+        <h3><span class="dot"></span>核心思想：新老策略对比，稳住更新步长</h3>
+        <p>PPO 用"重要性采样"把旧策略采到的样本复用于新策略，并用一个 <b>clip 裁剪</b>限制每一步更新幅度——如果新旧策略差异超过 \(\varepsilon\) 就把它截断，从而保证训练稳定。</p>
+        <div class="formula">
+          <div class="label">PPO-Clip 目标 + KL 惩罚（LLM 版）</div>
+          \[ \mathcal{L}_{\text{PPO}} = \mathbb{E}_{t} \Big[ \min\big( \rho_t \, \hat{A}_t,\; \mathrm{clip}(\rho_t,\, 1-\varepsilon,\, 1+\varepsilon) \, \hat{A}_t \big) \Big] - \beta \, \mathrm{KL}(\pi_\theta \| \pi_{\text{ref}}) \]
+          <div style="font-size:12.5px;color:#56617a;margin-top:6px">其中重要性比率 \(\rho_t = \dfrac{\pi_\theta(a_t \mid s_t)}{\pi_{\text{old}}(a_t \mid s_t)}\)，\(\hat{A}_t\) 是 GAE 估计的优势值。</div>
+        </div>
+
+        <div class="pros-grid">
+          <div class="pros-card"><div class="k">需要的模型</div><div class="v">4 个：Actor（策略）＋ Critic（价值网络）＋ Reference（参考）＋ RM（奖励）</div></div>
+          <div class="pros-card"><div class="k">优势估计</div><div class="v">GAE 优势，靠 Critic 价值网络 \(V(s)\) 提供基线</div></div>
+          <div class="pros-card"><div class="k">优点</div><div class="v good">稳定、通用，是大量闭源/开源模型对齐的黄金标准</div></div>
+          <div class="pros-card"><div class="k">缺点</div><div class="v bad">在线采样 + 4 个模型常驻显存，训练开销极大</div></div>
+        </div>
+
+        <div class="note info">
+          <span class="t">一句话总结：</span>PPO = 用"旧样本重复利用 + 裁剪限制步长 + 价值网络降方差"三件套，让 RL 训练既稳又高效——代价是要背上 Critic 这个大包袱。
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 5. GRPO ================= -->
+    <section id="s5">
+      <div class="panel">
+        <h2><span class="no">05</span>GRPO · 丢掉 Critic 的轻量派</h2>
+        <p><b>GRPO（Group Relative Policy Optimization，组相对策略优化）</b>由 DeepSeek 提出，因 DeepSeek-R1 而爆红。它观察到一个事实：<strong>价值网络 \(V(s)\) 既难训练又耗显存</strong>，于是干脆把它扔掉——用"组内多个采样结果的相对水平"来代替价值网络提供基线。</p>
+
+        <h3><span class="dot"></span>核心思想：组内平均代替价值网络</h3>
+        <p>对同一个问题 \(q\) 采样 \(G\) 个回答（一个 group），算出各自的奖励后做标准化，得到组内优势：<b>回答比组内平均好多少</b>。所有采样、打分、标准化都是自监督的，不需要额外的 Critic。</p>
+        <div class="formula">
+          <div class="label">GRPO 目标（组内优势 + 显式 KL）</div>
+          \[ \mathcal{L}_{\text{GRPO}} = \mathbb{E}\Big[ \frac{1}{G} \sum_{i=1}^{G} \min\big( \rho_i \, \hat{A}_i,\; \mathrm{clip}(\rho_i,\, 1-\varepsilon,\, 1+\varepsilon) \, \hat{A}_i \big) \Big] - \beta \, \mathbb{E}[\mathrm{KL}]\ \ \text{,}\quad \hat{A}_i = \frac{r_i - \text{mean}(\mathbf{r})}{\text{std}(\mathbf{r})} \]
+        </div>
+
+        <div class="pros-grid">
+          <div class="pros-card"><div class="k">需要的模型</div><div class="v">3 个：Actor ＋ Reference ＋ RM（无 Critic）</div></div>
+          <div class="pros-card"><div class="k">优势估计</div><div class="v">组内奖励 z-score 标准化，无价值网络</div></div>
+          <div class="pros-card"><div class="k">优点</div><div class="v good">省一半左右显存，工程简单，R1 大规模验证有效</div></div>
+          <div class="pros-card"><div class="k">缺点</div><div class="v bad">组内样本方差大时基线有偏；离线/无采样场景不适用</div></div>
+        </div>
+
+        <div class="note info">
+          <span class="t">一句话总结：</span>GRPO = "采样 N 个答案，比一比谁更好"——把价值网络省掉，用组内相对分数当优势，性价比极高的 PPO 替代方案。
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 6. DPO ================= -->
+    <section id="s6">
+      <div class="panel">
+        <h2><span class="no">06</span>DPO · 不需要 RL 的"偏好直调"</h2>
+        <p><b>DPO（Direct Preference Optimization，直接偏好优化）</b>把"先训 RM、再跑 RL"的两阶段过程，数学上化简为<strong>一个简单的二分类损失</strong>。它把 RL 目标闭式解回代进损失函数，于是完全不需要 RM、不需要在线采样、也不需要 Critic。</p>
+
+        <h3><span class="dot"></span>核心思想：偏好数据直接调参</h3>
+        <p>对于一对偏好数据（好回答 \(y_w\)、差回答 \(y_l\)），DPO 让策略在"做得好的地方更像参考模型、做得差的地方偏离参考模型"。凡是当前策略更偏好好回答、厌恶差回答，损失就小。</p>
+        <div class="formula">
+          <div class="label">DPO 损失（把 RLHF 目标变成分类损失）</div>
+          \[ \mathcal{L}_{\text{DPO}} = - \mathbb{E}_{(x,y_w,y_l)} \Big[ \log \sigma\Big( \beta \log \frac{\pi_\theta(y_w \mid x)}{\pi_{\text{ref}}(y_w \mid x)} - \beta \log \frac{\pi_\theta(y_l \mid x)}{\pi_{\text{ref}}(y_l \mid x)} \Big) \Big] \]
+        </div>
+
+        <div class="pros-grid">
+          <div class="pros-card"><div class="k">需要的模型</div><div class="v">2 个：Policy ＋ Reference（无需 RM / Critic）</div></div>
+          <div class="pros-card"><div class="k">训练方式</div><div class="v">离线小批量梯度下降，像普通 SFT 一样稳定</div></div>
+          <div class="pros-card"><div class="k">优点</div><div class="v good">实现简单、稳定、省显存，社区最爱</div></div>
+          <div class="pros-card"><div class="k">缺点</div><div class="v bad">无在线探索；对偏好数据质量敏感；理论上仍是"隐式 KL 约束"</div></div>
+        </div>
+
+        <div class="note key">
+          <span class="t">DPO 的定位：</span>它本质上是把 RLHF 的数学结构"翻译"成了监督式损失，所以在许多场景（特别是数据量适中、需要快速上线时）效果与 PPO 相当，却便宜得多。这也是为什么现在很多项目直接"跳过 RL 跑 DPO"。
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 7. 其他算法 ================= -->
+    <section id="s7">
+      <div class="panel">
+        <h2><span class="no">07</span>其他值得一提的算法</h2>
+
+        <div class="tabs" id="tabs">
+          <button class="tab active" data-target="p-rloo">RLOO</button>
+          <button class="tab" data-target="p-kto">KTO</button>
+          <button class="tab" data-target="p-orpo">ORPO</button>
+          <button class="tab" data-target="p-simpo">SimPO</button>
+        </div>
+
+        <div class="tabpane active" id="p-rloo">
+          <div class="alg-head"><h4>RLOO</h4><span class="badge alt">REINFORCE 改良</span></div>
+          <p><b>RLOO（REINFORCE with Leave-One-Out）</b>是最朴素的策略梯度算法 REINFORCE 的现代改良版。对同一个问题采样一组回答，把"本回答的奖励 - 组内其他回答的平均奖励"作为优势，也就是用"组内留一平均"当基线。</p>
+          <div class="formula">
+            <div class="label">RLOO 优势（组内留一基线）</div>
+            \[ \hat{A}_i = r_i - \frac{1}{G-1} \sum_{j \neq i} r_j \]
+          </div>
+          <div class="pros-grid">
+            <div class="pros-card"><div class="k">特点</div><div class="v">最简单直观的策略梯度，无 Critic、无裁剪</div></div>
+            <div class="pros-card"><div class="k">优点</div><div class="v good">代码量小、易复现，是理解 RL 的最佳起点</div></div>
+            <div class="pros-card"><div class="k">缺点</div><div class="v bad">方差仍较大，收敛不如 PPO/GRPO 稳</div></div>
+          </div>
+        </div>
+
+        <div class="tabpane" id="p-kto">
+          <div class="alg-head"><h4>KTO</h4><span class="badge alt">单样本偏好</span></div>
+          <p><b>KTO（Kahneman–Tversky Optimization）</b>不需要成对的"好 vs 差"数据，只需要单独标注"这个回答好不好"（参考前景理论，人对损失更敏感）。它用 <b>\(r_\theta(x,y) = \beta \log \frac{\pi_\theta(y\mid x)}{\pi_{\text{ref}}(y\mid x)}\)</b> 与阈值 0 比较，好回答推到 0 以上、坏回答压到 0 以下。</p>
+          <div class="pros-grid">
+            <div class="pros-card"><div class="k">数据要求</div><div class="v">仅需单条质量标注（非成对），数据更容易获取</div></div>
+            <div class="pros-card"><div class="k">优点</div><div class="v good">贴近真实标注场景（很多数据只有"好不好"没有"谁更好"）</div></div>
+            <div class="pros-card"><div class="k">缺点</div><div class="v bad">对"好/坏"阈值敏感，调参略麻烦</div></div>
+          </div>
+        </div>
+
+        <div class="tabpane" id="p-orpo">
+          <div class="alg-head"><h4>ORPO</h4><span class="badge alt">SFT + 偏好一体</span></div>
+          <p><b>ORPO（Odds-Ratio Preference Optimization）</b>把 SFT 和偏好对齐合并到一次训练中：在普通交叉熵损失之外，额外加一项"几率比（Odds Ratio）"惩罚，让模型对好回答的概率相对差回答上升。它<strong>连参考模型都不需要</strong>。</p>
+          <div class="pros-grid">
+            <div class="pros-card"><div class="k">需要的模型</div><div class="v">仅 1 个：Policy 自身</div></div>
+            <div class="pros-card"><div class="k">优点</div><div class="v good">两阶段变一阶段，省一次完整训练，无需参考模型</div></div>
+            <div class="pros-card"><div class="k">缺点</div><div class="v bad">同时优化两个目标可能相互干扰，稳定性略逊</div></div>
+          </div>
+        </div>
+
+        <div class="tabpane" id="p-simpo">
+          <div class="alg-head"><h4>SimPO</h4><span class="badge alt">DPO 精简版</span></div>
+          <p><b>SimPO（Simple Preference Optimization）</b>把 DPO 进一步简化：去掉参考模型，改用回答长度的<strong>平均对数概率</strong>作为隐式奖励，并引入长度归一化，缓解 DPO 的"偏爱短回答"偏差。</p>
+          <div class="pros-grid">
+            <div class="pros-card"><div class="k">需要的模型</div><div class="v">仅 1 个：Policy 自身</div></div>
+            <div class="pros-card"><div class="k">优点</div><div class="v good">更省显存，长度归一化让长短回答更公平</div></div>
+            <div class="pros-card"><div class="k">缺点</div><div class="v bad">无参考模型约束，需谨慎处理过拟合</div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 8. 对比 ================= -->
+    <section id="s8">
+      <div class="panel">
+        <h2><span class="no">08</span>算法全景对比</h2>
+        <div class="tbl-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>维度</th>
+                <th>PPO</th>
+                <th>GRPO</th>
+                <th>DPO</th>
+                <th>RLOO</th>
+                <th>KTO</th>
+                <th>ORPO / SimPO</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="row-name">是否需要 RM</td>
+                <td class="check">是</td>
+                <td class="check">是</td>
+                <td class="cross">否</td>
+                <td class="check">是</td>
+                <td class="check">是</td>
+                <td class="cross">否</td>
+              </tr>
+              <tr>
+                <td class="row-name">是否需要参考模型</td>
+                <td class="check">是</td>
+                <td class="check">是</td>
+                <td class="check">是</td>
+                <td class="check">是</td>
+                <td class="check">是</td>
+                <td class="cross">否</td>
+              </tr>
+              <tr>
+                <td class="row-name">是否需要 Critic 值网络</td>
+                <td class="check">是</td>
+                <td class="cross">否</td>
+                <td class="cross">否</td>
+                <td class="cross">否</td>
+                <td class="cross">否</td>
+                <td class="cross">否</td>
+              </tr>
+              <tr>
+                <td class="row-name">训练方式</td>
+                <td>在线采样</td>
+                <td>在线采样</td>
+                <td>离线偏好</td>
+                <td>在线采样</td>
+                <td>离线偏好</td>
+                <td>离线偏好</td>
+              </tr>
+              <tr>
+                <td class="row-name">内存开销</td>
+                <td style="color:#be185d;font-weight:700">极高</td>
+                <td style="color:#b45309;font-weight:700">高</td>
+                <td style="color:#0e7a4d;font-weight:700">低</td>
+                <td style="color:#b45309;font-weight:700">高</td>
+                <td style="color:#0e7a4d;font-weight:700">低</td>
+                <td style="color:#0e7a4d;font-weight:700">最低</td>
+              </tr>
+              <tr>
+                <td class="row-name">训练稳定性</td>
+                <td style="color:#0e7a4d;font-weight:700">很稳</td>
+                <td style="color:#0e7a4d;font-weight:700">很稳</td>
+                <td style="color:#0e7a4d;font-weight:700">很稳</td>
+                <td style="color:#be185d;font-weight:700">一般</td>
+                <td style="color:#b45309;font-weight:700">一般</td>
+                <td style="color:#b45309;font-weight:700">一般</td>
+              </tr>
+              <tr>
+                <td class="row-name">代表性工作</td>
+                <td>InstructGPT / LLaMA-2</td>
+                <td>DeepSeek-R1 / Qwen</td>
+                <td>Zephyr / 大量开源项目</td>
+                <td>学术探索</td>
+                <td>Zephyr 变体</td>
+                <td>ORPO 论文 / SimPO 论文</td>
+              </tr>
+              <tr>
+                <td class="row-name">一句话定位</td>
+                <td>稳定上限</td>
+                <td>性价比之王</td>
+                <td>省事首选</td>
+                <td>入门教学</td>
+                <td>数据受限</td>
+                <td>极致省资源</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="note info">
+          <span class="t">读表技巧：</span>向左看（PPO/GRPO）是"真·强化学习"，有在线探索能力，上限更高；向右看（DPO 及之后）是"偏好直调"，训练便宜但缺少在线探索。选哪个，取决于你的<b>预算、数据形态和目标</b>。
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 9. 选型 ================= -->
+    <section id="s9">
+      <div class="panel">
+        <h2><span class="no">09</span>实践选型建议</h2>
+        <p>不同场景的最佳选择差异很大，一个实用的决策思路如下：</p>
+
+        <div class="pros-grid" style="grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));">
+          <div class="pros-card">
+            <div class="k">场景 A · 追求极致上限</div>
+            <div class="v">目标：数学/代码等需要强推理的对齐。<br><b>建议：PPO</b>，预算充足且有高质量 RM。</div>
+          </div>
+          <div class="pros-card">
+            <div class="k">场景 B · 复刻 R1 式推理</div>
+            <div class="v">目标：RL 驱动的推理能力提升。<br><b>建议：GRPO</b>，参考 DeepSeek-R1 的成熟路线。</div>
+          </div>
+          <div class="pros-card">
+            <div class="k">场景 C · 有偏好数据、想快速对齐</div>
+            <div class="v">目标：通用对话对齐、安全价值观。<br><b>建议：DPO</b>，离线稳定、效果可观。</div>
+          </div>
+          <div class="pros-card">
+            <div class="k">场景 D · 数据只有"好坏"标注</div>
+            <div class="v">目标：标注成本受限。<br><b>建议：KTO</b>，单样本偏好即可训练。</div>
+          </div>
+          <div class="pros-card">
+            <div class="k">场景 E · 想从 SFT 一步到位</div>
+            <div class="v">目标：最小改动、省训练轮次。<br><b>建议：ORPO / SimPO</b>，SFT 阶段顺手完成对齐。</div>
+          </div>
+          <div class="pros-card">
+            <div class="k">场景 F · 入门学习</div>
+            <div class="v">目标：理解策略梯度本质。<br><b>建议：RLOO</b>，代码最短、概念最纯。</div>
+          </div>
+        </div>
+
+        <h3><span class="dot"></span>最后的一张"思维地图"</h3>
+        <p>把整个 SFT → RL 链路记成一句话：</p>
+        <div class="formula" style="background:linear-gradient(135deg,#141a2e,#262f52);border-color:#3d4a7a;">
+          <div class="label" style="color:#93c5fd">记忆口诀</div>
+          <div style="color:#e8ecff;font-size:16px;font-weight:600;line-height:1.9">
+            预训练学说话 → <span style="color:#67e8f9">SFT 学着答</span> → <span style="color:#a7f3d0">RM 学打分</span> → <span style="color:#fda4af">RL 学追求</span>（PPO 稳、GRPO 省、DPO 快）
+          </div>
+        </div>
+
+        <div class="end-note">
+          本页为图解学习笔记 · 关键词：SFT · RLHF · PPO · GRPO · DPO · KL 约束 · 策略梯度
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+// ---------- Tab 切换 ----------
+document.querySelectorAll('.tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tabpane').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(btn.dataset.target).classList.add('active');
+  });
+});
+
+// ---------- 侧边栏高亮 ----------
+const sections = document.querySelectorAll('main section');
+const navLinks = document.querySelectorAll('.sidebar a');
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      navLinks.forEach(a => a.classList.remove('active'));
+      const id = entry.target.id;
+      const link = document.querySelector(`.sidebar a[href="#${id}"]`);
+      if (link) link.classList.add('active');
+    }
+  });
+}, { rootMargin: '-20% 0px -70% 0px' });
+sections.forEach(s => observer.observe(s));
+</script>
+</body>
+</html>

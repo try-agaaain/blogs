@@ -1,11 +1,14 @@
 // 端到端验证：模拟 HTML 中实时 AI 决策的完整逻辑（不依赖 DOM）
-// 从 HTML 中提取 playAI 相关的辅助函数（aiGetState / aiForward / aiAct）来跑
+// 从 HTML 中提取 AI_MODEL 与 aiGetState / aiForward / aiAct 函数来跑
+// 支持 v1 / v2 / v3 三种讲解页（自动检测初始蛇位与 N 依赖）
 // 用法：node scripts/verify_live_ai.js [html文件名]   （默认 PPO贪吃蛇讲解.html）
 const fs = require('fs');
 const vm = require('vm');
 
 const target = process.argv[2] || 'PPO贪吃蛇讲解.html';
 const html = fs.readFileSync(require('path').join(__dirname, '..', target), 'utf-8');
+
+const isV3 = html.includes('var TRAIN_DATA');
 
 // 提取 AI_MODEL 定义（内嵌为 JSON 对象，可能包含嵌套数组）
 const modelMatch = html.match(/var AI_MODEL = (\{[\s\S]*?\});/);
@@ -22,30 +25,37 @@ function extractFn(name) {
 
 const fns = ['aiGetState', 'aiForward', 'aiAct'];
 const fnSrc = fns.map(extractFn).join('\n');
-// aiGetState 依赖 DIRS（方向增量表），一并注入
-const DIRS_SRC = 'const DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };';
+// 函数依赖注入：v3 的 aiGetState 引用外部 N（网格边长）；v1/v2 引用外部 DIRS
+const needsN = !/const N = |let N = /.test(fnSrc) && fnSrc.includes('N');
+const DIRS_SRC = fnSrc.includes('DIRS') && !fnSrc.includes('const DIRS') && !fnSrc.includes('DIR_VEC')
+  ? 'const DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };' : '';
+const EXTRA = (needsN ? 'const N = 12;' : '') + (DIRS_SRC ? '\n' + DIRS_SRC : '');
 
 const sandbox = { Math, console, Set, Array, Number, parseInt, isNaN };
 sandbox.AI_MODEL = undefined;
 vm.createContext(sandbox);
-vm.runInContext('var AI_MODEL = ' + aiModelJson + ';\n' + DIRS_SRC + '\n' + fnSrc, sandbox);
+vm.runInContext('var AI_MODEL = ' + aiModelJson + ';\n' + EXTRA + '\n' + fnSrc, sandbox);
 
 const M = sandbox.AI_MODEL;
-console.log('模型维度: h=' + M.h, 'na=' + M.na, 'W1 行数=' + M.W1.length, '列数=' + M.W1[0].length);
+console.log(`[${target}] 模型维度: h=${M.h} na=${M.na} W1=${M.W1.length}x${M.W1[0].length}`);
 
-// 蛇游戏模拟（与 HTML step 一致）
+// 蛇游戏模拟（初始蛇位与对应页面一致：v3 对齐 snake_game.py 的 (4,6)）
 const N = 12;
 const DIR_VEC = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
 const TURN_A = { up: ['up', 'left', 'right'], down: ['down', 'right', 'left'], left: ['left', 'down', 'up'], right: ['right', 'up', 'down'] };
+const START = isV3 ? [[4, 6], [3, 6], [2, 6]] : [[5, 6], [4, 6], [3, 6]];
 function playOnce() {
-  let snake = [[5, 6], [4, 6], [3, 6]], dir = 'right';
+  let snake = START.map(p => p.slice()), dir = 'right';
   let foods = 0;
-  const occ = new Set(snake.map(p => p[0] + ',' + p[1]));
-  const free = [];
-  for (let x = 0; x < N; x++) for (let y = 0; y < N; y++) if (!occ.has(x + ',' + y)) free.push([x, y]);
-  let food = free[Math.floor(Math.random() * free.length)];
+  function spawnFood(snakeArr) {
+    const occ = new Set(snakeArr.map(p => p[0] + ',' + p[1]));
+    const free = [];
+    for (let x = 0; x < N; x++) for (let y = 0; y < N; y++) if (!occ.has(x + ',' + y)) free.push([x, y]);
+    return free[Math.floor(Math.random() * free.length)];
+  }
+  let food = spawnFood(snake);
   let steps = 0;
-  while (steps++ < 3000) {
+  while (steps++ < 5000) {
     const a = sandbox.aiAct(snake, dir, food, M);
     dir = TURN_A[dir][a];
     const [dx, dy] = DIR_VEC[dir];
@@ -55,13 +65,8 @@ function playOnce() {
     const hitBody = snake.some(p => p[0] === nx && p[1] === ny);
     if (hitWall || hitBody) break;
     snake.unshift([nx, ny]);
-    if (nx === food[0] && ny === food[1]) {
-      foods++;
-      const o = new Set(snake.map(p => p[0] + ',' + p[1]));
-      const f2 = [];
-      for (let x = 0; x < N; x++) for (let y = 0; y < N; y++) if (!o.has(x + ',' + y)) f2.push([x, y]);
-      food = f2[Math.floor(Math.random() * f2.length)];
-    } else snake.pop();
+    if (nx === food[0] && ny === food[1]) { foods++; food = spawnFood(snake); }
+    else snake.pop();
   }
   return { foods, len: snake.length };
 }

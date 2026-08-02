@@ -117,14 +117,18 @@ def evaluate(net, n_episodes=24, seed=None):
 
 
 # ------------------------------------------------------------ 同步讲解页
-def embed_weights_to_html(model_json, html_path):
-    """把 best_snake.json 的策略权重内嵌进讲解页（var AI_MODEL 块）。
+def embed_weights_to_html(model_json, html_path, curve_csv="logs/full_curve.csv"):
+    """把训练产物内嵌进讲解页。
 
-    讲解页在 file:// 协议下用浏览器直接打开，无法 fetch 本地 JSON，
-    所以训练结束后把最新权重"烧录"进 HTML，供「AI 自动玩」实时推理。
+    AI_MODEL：best_snake.json 的策略权重，供「AI 自动玩」实时推理。
+    TRAIN_DATA：logs/full_curve.csv 提取的训练曲线数据，供学习曲线绘图。
+    v3 页面同时嵌入两者；v1/v2 页面只嵌入权重（兼容旧逻辑）。
     """
     with open(model_json, encoding="utf-8") as f:
         d = json.load(f)
+
+    def to_js(obj):
+        return json.dumps(obj, separators=(",", ":"))
 
     # 只提取策略网络部分（价值头仅训练用，浏览器推理用不到）
     ai_model = {
@@ -135,29 +139,56 @@ def embed_weights_to_html(model_json, html_path):
         "W2p": d["W2p"],
         "b2p": d["b2p"],
     }
-    script = (
-        "<script>/* 浏览器内实时运行的策略网络权重（由 scripts/train.py 训练结束后"
-        "自动从 checkpoint/best_snake.json 内嵌，供「AI 自动玩」现场决策使用） */\n"
-        "var AI_MODEL = " + json.dumps(ai_model, separators=(",", ":")) + ";\n"
-        "</script>"
-    )
+
+    curve = None
+    if os.path.exists(curve_csv):
+        iters, scores, foods, lens, kl = [], [], [], [], []
+        with open(curve_csv, encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                try:
+                    if row["score"] != "nan":
+                        iters.append(int(row["iter"]))
+                        scores.append(float(row["score"]))
+                        foods.append(float(row["food"]))
+                        lens.append(float(row["len"]))
+                    kl.append(float(row["kl"]))
+                except (KeyError, ValueError):
+                    continue
+        curve = {"iters": iters, "scores": scores, "foods": foods,
+                 "lens": lens, "kl": kl}
 
     with open(html_path, encoding="utf-8") as f:
         html = f.read()
 
-    # 替换已有的 AI_MODEL 块；没有则插到第一个内联 <script> 之前
-    pattern = re.compile(
-        r"<script>/\* 浏览器内实时运行的策略网络权重[\s\S]*?</script>", re.MULTILINE)
-    if pattern.search(html):
-        html = pattern.sub(lambda m: script, html, count=1)
+    if "var TRAIN_DATA" in html:
+        # v3 页面：替换占位符
+        html = re.sub(r"var AI_MODEL = [^;]*;",
+                      "var AI_MODEL = " + to_js(ai_model) + ";",
+                      html, count=1)
+        if curve is not None:
+            html = re.sub(r"var TRAIN_DATA = [^;]*;",
+                          "var TRAIN_DATA = " + to_js(curve) + ";",
+                          html, count=1)
     else:
-        anchor = "<script>\n"
-        assert anchor in html, f"{html_path} 里找不到 <script> 锚点"
-        html = html.replace(anchor, script + "\n" + anchor, 1)
+        # v1/v2 页面：替换 AI_MODEL 块（兼容旧逻辑）
+        script = (
+            "<script>/* 浏览器内实时运行的策略网络权重（由 scripts/train.py 训练结束后"
+            "自动从 checkpoint/best_snake.json 内嵌，供「AI 自动玩」现场决策使用） */\n"
+            "var AI_MODEL = " + to_js(ai_model) + ";\n"
+            "</script>"
+        )
+        pattern = re.compile(
+            r"<script>/\* 浏览器内实时运行的策略网络权重[\s\S]*?</script>", re.MULTILINE)
+        if pattern.search(html):
+            html = pattern.sub(lambda m: script, html, count=1)
+        else:
+            anchor = "<script>\n"
+            assert anchor in html, f"{html_path} 里找不到 <script> 锚点"
+            html = html.replace(anchor, script + "\n" + anchor, 1)
 
     with open(html_path, "w", encoding="utf-8") as f:
         f.write(html)
-    print(f"已把 AI_MODEL（{len(script)//1024} KB）同步进 {os.path.basename(html_path)}")
+    print(f"已同步 {os.path.basename(html_path)}（AI_MODEL + TRAIN_DATA）")
 
 
 # ------------------------------------------------------------ 主流程
@@ -194,6 +225,7 @@ def main():
     html_paths = [
         os.path.join(_ROOT, "PPO贪吃蛇讲解.html"),
         os.path.join(_ROOT, "PPO贪吃蛇讲解v2.html"),
+        os.path.join(_ROOT, "PPO贪吃蛇讲解v3.html"),
     ]
 
     # 仅同步模式：把现有模型权重烧录进讲解页后直接退出

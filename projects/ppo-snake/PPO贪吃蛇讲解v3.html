@@ -1,0 +1,1335 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PPO 的完整推导与工程实现 · 以 12×12 贪吃蛇为例</title>
+<script>
+window.MathJax = {
+  tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] },
+  svg: { fontCache: 'global' }
+};
+</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+<style>
+:root {
+  --bg: #f7f8fa;
+  --panel: #ffffff;
+  --ink: #1f2430;
+  --ink-2: #5b6472;
+  --line: #e6e9f0;
+  --primary: #2563eb;
+  --primary-2: #4f46e5;
+  --accent: #0891b2;
+  --green: #059669;
+  --amber: #d97706;
+  --rose: #e11d48;
+  --radius: 14px;
+  --shadow: 0 1px 2px rgba(16,24,40,.05), 0 10px 28px rgba(16,24,40,.06);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 84px; }
+body {
+  font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+  background: var(--bg); color: var(--ink); line-height: 1.78; font-size: 15px;
+}
+::selection { background: rgba(37,99,235,.16); }
+
+/* ---------- 顶栏 ---------- */
+.topbar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  background: rgba(255,255,255,.92); backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+.topbar .inner { max-width: 1240px; margin: 0 auto; padding: 12px 22px; display: flex; align-items: center; gap: 14px; }
+.topbar .brand { font-weight: 800; font-size: 15px; letter-spacing: .2px; white-space: nowrap; }
+.topbar .brand .sub { color: var(--ink-2); font-weight: 500; font-size: 12.5px; margin-left: 6px; }
+.topbar nav { display: flex; gap: 2px; flex-wrap: wrap; margin-left: auto; }
+.topbar nav a {
+  font-size: 12.5px; color: var(--ink-2); text-decoration: none;
+  padding: 5px 9px; border-radius: 8px; transition: all .15s; white-space: nowrap;
+}
+.topbar nav a:hover { background: #eef1f8; color: var(--ink); }
+.topbar nav a.active { background: rgba(37,99,235,.1); color: var(--primary); font-weight: 600; }
+@media (max-width: 860px) { .topbar .brand .sub { display: none; } .topbar nav { display: none; } }
+
+/* ---------- 布局 ---------- */
+.layout { max-width: 1240px; margin: 0 auto; display: flex; gap: 26px; padding: 0 20px; }
+main { flex: 1; min-width: 0; max-width: 860px; padding: 96px 0 80px; }
+aside.toc {
+  width: 300px; flex-shrink: 0; position: sticky; top: 72px; align-self: flex-start;
+  height: calc(100vh - 96px); overflow-y: auto; padding: 8px 4px 30px 0; display: none;
+}
+@media (min-width: 1080px) { aside.toc { display: block; } }
+aside.toc a {
+  display: block; padding: 7px 12px; border-radius: 9px; color: var(--ink-2);
+  text-decoration: none; font-size: 13px; border-left: 3px solid transparent; transition: all .15s;
+}
+aside.toc a:hover { background: #eef1f8; color: var(--ink); }
+aside.toc a.active { background: rgba(37,99,235,.08); color: var(--primary); border-left-color: var(--primary); font-weight: 600; }
+
+/* ---------- 首屏 ---------- */
+.hero {
+  background: linear-gradient(160deg, #0f172a 0%, #1e293b 55%, #1e3a5f 100%);
+  color: #eef2ff; padding: 34px 26px 30px; border-radius: 18px; margin-bottom: 22px;
+  box-shadow: var(--shadow);
+}
+.hero .kicker { font-size: 12px; letter-spacing: .14em; color: #93c5fd; font-weight: 700; margin-bottom: 10px; }
+.hero h1 { font-size: 27px; font-weight: 800; line-height: 1.35; letter-spacing: .3px; }
+.hero h1 .hl { color: #7dd3fc; }
+.hero p { margin-top: 12px; color: #c3cde6; font-size: 14.5px; max-width: 760px; }
+.hero .facts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.hero .fact {
+  font-size: 12px; color: #dbe4ff; background: rgba(255,255,255,.07);
+  border: 1px solid rgba(255,255,255,.14); padding: 4px 12px; border-radius: 999px;
+}
+
+/* ---------- 面板 ---------- */
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 26px 28px; margin-bottom: 20px; }
+h2 { font-size: 21px; font-weight: 800; margin-bottom: 16px; letter-spacing: .2px; display: flex; align-items: baseline; gap: 10px; }
+h2 .no { font-size: 12px; font-weight: 800; color: #fff; background: linear-gradient(135deg, var(--primary), var(--primary-2)); padding: 3px 9px; border-radius: 7px; flex-shrink: 0; align-self: center; }
+h3 { font-size: 16px; font-weight: 700; margin: 24px 0 8px; }
+h4 { font-size: 14.5px; font-weight: 700; margin: 18px 0 6px; }
+p { color: var(--ink); margin: 9px 0; }
+.muted { color: var(--ink-2); }
+b, strong { color: #111827; }
+
+.formula {
+  background: #f8fafc; border: 1px solid var(--line); border-left: 4px solid var(--primary);
+  border-radius: 10px; padding: 13px 18px; margin: 12px 0; overflow-x: auto;
+}
+.formula .label { font-size: 12px; color: var(--primary); font-weight: 700; letter-spacing: .05em; margin-bottom: 4px; }
+.formula.dark { background: linear-gradient(150deg, #111827, #1e293b); border-color: #334155; border-left-color: #60a5fa; }
+.formula.dark .label { color: #93c5fd; }
+.formula.dark .txt { color: #e6ecff; font-size: 16px; font-weight: 500; line-height: 1.95; }
+.formula.dark .txt .em { color: #fbbf24; }
+
+.note { border-radius: 10px; padding: 12px 16px; margin: 12px 0; font-size: 13.5px; border: 1px solid; }
+.note.info { background: #eff6ff; border-color: #bfdbfe; color: #1e40af; }
+.note.warn { background: #fffbeb; border-color: #fde68a; color: #92400e; }
+.note.key { background: #ecfdf5; border-color: #a7f3d0; color: #065f46; }
+.note .t { font-weight: 700; margin-right: 5px; }
+.note.mono { font-family: "SF Mono", "Cascadia Code", Consolas, monospace; font-size: 12.5px; }
+
+ul.clean { margin: 8px 0; list-style: none; }
+ul.clean li { position: relative; padding-left: 20px; margin: 6px 0; }
+ul.clean li::before { content: ""; position: absolute; left: 3px; top: 10px; width: 7px; height: 7px; border-radius: 2px; background: linear-gradient(135deg, var(--primary), var(--primary-2)); }
+
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; margin: 12px 0; }
+th, td { padding: 8px 11px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+th { background: #f3f5f9; font-weight: 700; }
+.tbl-wrap { overflow-x: auto; }
+tr.odd td { background: #fafbfd; }
+td code { white-space: nowrap; }
+
+code, .code-inline { font-family: "SF Mono", "Cascadia Code", Consolas, monospace; font-size: 12.5px; background: #eef1f8; color: #3341a8; padding: 1.5px 6px; border-radius: 5px; }
+pre.code {
+  background: #0f172a; color: #dbe4ff; padding: 16px 20px; border-radius: 12px;
+  overflow-x: auto; font-size: 12.5px; line-height: 1.7; margin: 12px 0;
+  font-family: "SF Mono", "Cascadia Code", Consolas, monospace;
+}
+pre.code .c { color: #7d8bb4; }
+pre.code .k { color: #93c5fd; }
+pre.code .f { color: #fbbf24; }
+pre.code .s { color: #6ee7b7; }
+pre.code .n { color: #f9a8d4; }
+
+.ctrl { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 12px 0; }
+.btn {
+  border: 1px solid var(--line); background: #fff; color: var(--ink);
+  padding: 5px 13px; border-radius: 9px; font-size: 12.5px; cursor: pointer; transition: all .15s; font-family: inherit;
+}
+.btn:hover { border-color: #c2c9dd; background: #f8f9fd; }
+.btn.active { background: linear-gradient(135deg, var(--primary), var(--primary-2)); color: #fff; border-color: transparent; }
+.slider-group { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--ink-2); }
+.slider-group input[type=range] { accent-color: var(--primary); width: 120px; }
+.slider-val { font-weight: 700; color: var(--primary); min-width: 40px; text-align: center; }
+
+canvas.plot { width: 100%; display: block; background: #fff; }
+.chart-cap { font-size: 12.5px; color: var(--ink-2); margin-top: 5px; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--ink-2); margin-top: 9px; }
+.legend .item { display: inline-flex; align-items: center; gap: 6px; }
+.legend .sw { width: 18px; height: 4px; border-radius: 3px; display: inline-block; }
+.legend .sw.dot { width: 10px; height: 10px; border-radius: 50%; }
+
+/* ---------- 游戏 ---------- */
+.game-wrap { display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-start; margin: 14px 0; }
+.snake-board { flex: 1 1 320px; max-width: 430px; margin: 0 auto; }
+.snake-board canvas { width: 100%; display: block; background: #0f172a; border-radius: 13px; border: 1px solid #1e293b; }
+.game-side { flex: 1 1 260px; min-width: 250px; }
+.game-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 10px 0; }
+.game-stats .gs { background: #f8fafc; border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
+.game-stats .gs .k { font-size: 11.5px; color: var(--ink-2); }
+.game-stats .gs .v { font-size: 19px; font-weight: 800; color: var(--primary); }
+.game-stats .gs .v.small { font-size: 13.5px; }
+.game-side .ctrl { justify-content: flex-start; }
+
+/* ---------- 流水线 ---------- */
+.pipeline { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 12px 0; }
+.pipeline .step {
+  background: #f8fafc; border: 1px solid var(--line); border-radius: 9px;
+  padding: 7px 12px; font-size: 12.5px; font-weight: 600;
+}
+.pipeline .step.on { background: linear-gradient(135deg, var(--primary), var(--primary-2)); color: #fff; border-color: transparent; }
+.pipeline .arrow { color: #aab3c8; font-size: 15px; }
+
+/* ---------- 循环 ---------- */
+.loop-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); gap: 9px; margin-top: 10px; }
+.loop-item {
+  display: flex; gap: 9px; align-items: center; background: #f8fafc;
+  border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px;
+  font-size: 12.5px; opacity: .45; transition: all .25s;
+}
+.loop-item .li-i { width: 22px; height: 22px; border-radius: 7px; background: #e8ebf3; color: #5b6472; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 11px; flex-shrink: 0; }
+.loop-item.done { opacity: .75; }
+.loop-item.done .li-i { background: rgba(5,150,105,.14); color: #047857; }
+.loop-item.cur { opacity: 1; border-color: var(--primary); background: #f0f5ff; box-shadow: 0 0 0 3px rgba(37,99,235,.08); }
+.loop-item.cur .li-i { background: linear-gradient(135deg, var(--primary), var(--primary-2)); color: #fff; }
+
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 14px 0; }
+.kpi { background: #f8fafc; border: 1px solid var(--line); border-radius: 11px; padding: 11px 14px; text-align: center; }
+.kpi .k { font-size: 12px; color: var(--ink-2); }
+.kpi .v { font-size: 21px; font-weight: 800; color: var(--primary); margin-top: 2px; }
+.kpi .v.small { font-size: 15px; }
+
+.footer { text-align: center; color: var(--ink-2); font-size: 12.5px; padding: 30px 0 60px; }
+
+@media (max-width: 900px) {
+  .layout { padding: 0 12px; }
+  main { padding-top: 84px; }
+}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="inner">
+    <div class="brand">PPO 完整推导与工程实现<span class="sub">· 以 12×12 贪吃蛇为例</span></div>
+    <nav>
+      <a href="#s1">01 问题</a>
+      <a href="#s2">02 目标</a>
+      <a href="#s3">03 方差</a>
+      <a href="#s4">04 稳定</a>
+      <a href="#s5">05 算法</a>
+      <a href="#s6">06 环境</a>
+      <a href="#s7">07 实现</a>
+      <a href="#s8">08 训练</a>
+      <a href="#s9">09 证据</a>
+      <a href="#s10">10 复现</a>
+    </nav>
+  </div>
+</div>
+
+<div class="layout">
+  <aside class="toc">
+    <a href="#s1">01 · 问题设定：MDP 与贪吃蛇</a>
+    <a href="#s2">02 · 目标函数与策略梯度</a>
+    <a href="#s3">03 · 方差控制：价值函数与 GAE</a>
+    <a href="#s4">04 · 更新稳定：重要性采样与 Clip</a>
+    <a href="#s5">05 · 完整算法：采样到更新</a>
+    <a href="#s6">06 · 环境工程：状态与奖励</a>
+    <a href="#s7">07 · 纯 NumPy 实现</a>
+    <a href="#s8">08 · 训练系统与稳定策略</a>
+    <a href="#s9">09 · 实验证据</a>
+    <a href="#s10">10 · 复现与延伸</a>
+  </aside>
+
+  <main>
+
+    <!-- ==================== 00 首屏 ==================== -->
+    <div class="hero">
+      <div class="kicker">REINFORCEMENT LEARNING · FROM THEORY TO CODE</div>
+      <h1>从零推导 <span class="hl">PPO</span>，并训练出一个平均每局吃 30 个食物的贪吃蛇 AI</h1>
+      <p>本文不调用任何深度学习框架：游戏环境、神经网络、反向传播、Adam 优化器、PPO 更新全部用纯 NumPy 手写（约 550 行）。叙事上先立数学（MDP → 目标函数 → GAE → Clip），再谈工程（环境、实现、训练），最后给出真实实验证据。所有曲线与数字均来自本仓库真实运行结果。</p>
+      <div class="facts">
+        <span class="fact">MDP 五元组严格定义</span>
+        <span class="fact">策略梯度定理完整推导</span>
+        <span class="fact">21 维状态 / 3 动作 / 64 隐藏单元</span>
+        <span class="fact">PPO-Clip + GAE(λ) + 熵正则</span>
+        <span class="fact">实测平均得分 +880</span>
+      </div>
+    </div>
+
+    <!-- ==================== 01 问题设定 ==================== -->
+    <section id="s1">
+      <div class="panel">
+        <h2><span class="no">01</span>问题设定：把贪吃蛇写成一个数学对象</h2>
+        <p>强化学习研究的是「智能体与环境的交互」。要严谨地谈论算法，第一步是把这场交互写成数学结构——马尔可夫决策过程（Markov Decision Process, MDP）。贪吃蛇恰好是一个足够简单、又能承载全部核心要素的实例。</p>
+
+        <h3>1.1 MDP 五元组</h3>
+        <div class="formula dark">
+          <div class="label">MDP 定义</div>
+          <div class="txt">\[ \text{MDP} = (\,\mathcal{S},\ \mathcal{A},\ P,\ R,\ \gamma\,) \]</div>
+        </div>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th>符号</th><th>含义</th><th>贪吃蛇实例</th></tr></thead>
+            <tbody>
+              <tr><td>\(\mathcal{S}\)</td><td>状态空间</td><td>全部 21 维特征向量的集合（§6 详述）</td></tr>
+              <tr class="odd"><td>\(\mathcal{A}\)</td><td>动作空间</td><td>\(\{0,1,2\}\) = 直行 / 左转 / 右转（相对当前蛇头朝向）</td></tr>
+              <tr><td>\(P(s' \mid s, a)\)</td><td>状态转移概率</td><td>由游戏规则决定：撞墙/撞身体判负，吃食物变长换位</td></tr>
+              <tr class="odd"><td>\(R(s, a)\)</td><td>奖励函数</td><td>稀疏 + 双 shaping（§6.2 给出完整表达式）</td></tr>
+              <tr><td>\(\gamma\)</td><td>折扣因子</td><td>0.99，未来回报的折算率</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>1.2 动作为什么是「相对」的</h3>
+        <p>蛇不能 180° 掉头撞自己。若用绝对动作「上下左右」，会出现大量非法指令。改用相对动作（相对当前朝向：直行/左转/右转），既符合物理规则，又把动作空间压缩到 3 维。映射关系在代码中是一个固定查表：</p>
+        <div class="note mono">
+TURN = {"up": {0:"up", 1:"left", 2:"right"},
+        "down": {0:"down", 1:"right", 2:"left"},
+        "left": {0:"left", 1:"down", 2:"up"},
+        "right": {0:"right", 1:"up", 2:"down"}}
+        </div>
+
+        <h3>1.3 一局游戏 = 一条轨迹</h3>
+        <p>智能体从初始状态出发，循环「观察 \(s_t\) → 采样 \(a_t\) → 获得 \(r_t\) 与新状态 \(s_{t+1}\)」，直到终止。整段序列记为轨迹：</p>
+        <div class="formula">
+          <div class="label">轨迹 Trajectory</div>
+          <div class="txt">\[ \tau = s_0,\ a_0,\ r_0,\ s_1,\ a_1,\ r_1,\ \dots,\ s_T \]</div>
+        </div>
+        <p>轨迹上每一步奖励按折扣累加，得到总回报（Return）：</p>
+        <div class="formula">
+          <div class="label">折扣回报 Return</div>
+          <div class="txt">\[ G_t = \sum_{k=0}^{\infty} \gamma^{k} r_{t+k} = r_t + \gamma r_{t+1} + \gamma^2 r_{t+2} + \cdots \]</div>
+        </div>
+        <div class="note info"><span class="t">为什么折扣？</span>一是未来回报方差更大、可信度更低；二是在数学上保证无穷和的收敛。\(\gamma\) 越小越「短视」，越大越「远视」。本仓库取 0.99。</div>
+
+        <h3>1.4 策略：我们要学习的对象</h3>
+        <p>策略 \(\pi_\theta(a \mid s)\) 是「状态 → 动作概率分布」的映射，由一个带参数 \(\theta\) 的神经网络实现。学习的全部目标，就是找到一组参数，使得「从任意开局出发的平均总回报」尽可能大。</p>
+        <p class="muted" style="text-align:right;margin-top:8px">接下来：把「最大化期望回报」翻译成可计算的梯度 →</p>
+      </div>
+    </section>
+
+    <!-- ==================== 02 目标函数 ==================== -->
+    <section id="s2">
+      <div class="panel">
+        <h2><span class="no">02</span>目标函数与策略梯度定理</h2>
+        <p>本节回答核心问题：<b>「最大化期望回报」到底对 \(\theta\) 求什么导？</b>这是所有策略梯度方法的出发点，也是理解 PPO 的钥匙。</p>
+
+        <h3>2.1 目标函数</h3>
+        <p>设轨迹 \(\tau\) 按策略 \(\pi_\theta\) 生成，其概率记为 \(\pi_\theta(\tau)\)。目标函数是期望回报：</p>
+        <div class="formula dark">
+          <div class="label">强化学习目标</div>
+          <div class="txt">\[ J(\theta) = \mathbb{E}_{\tau \sim \pi_\theta}\big[ R(\tau) \big] \;\longrightarrow\; \max_{\theta} \]</div>
+        </div>
+        <p>难点在于：期望内嵌在轨迹分布里，而轨迹分布由网络输出 \(\pi_\theta(a|s)\) 与环境转移 \(P\) 共同决定。<b>我们不能对「分布」直接求导</b>——因为我们观测到的只是采样出的轨迹，环境内部的转移规则（游戏代码）不透明、不可微。</p>
+
+        <h3>2.2 三步推导：从期望到可计算的梯度</h3>
+        <p>策略梯度定理用「对数技巧」把这层壳剥掉。以下是完整推导，每一步都只用到微积分：</p>
+        <div class="formula">
+          <div class="label">策略梯度定理（三步推导）</div>
+          <div class="txt">\[
+          \begin{aligned}
+          \nabla_\theta J(\theta)
+            &= \nabla_\theta \int \pi_\theta(\tau)\, R(\tau)\, d\tau
+            & \text{（把期望写成积分）}\\[4pt]
+            &= \int \pi_\theta(\tau)\, \nabla_\theta \log \pi_\theta(\tau)\; R(\tau)\, d\tau
+            & \text{（对数技巧：} \nabla f = f\,\nabla\log f \text{）}\\[4pt]
+            &= \mathbb{E}_{\tau}\Big[ \Big(\sum_{t} \nabla_\theta \log \pi_\theta(a_t\mid s_t)\Big)\, R(\tau) \Big]
+            & \text{（轨迹概率连乘变连加）}
+          \end{aligned}
+          \]</div>
+        </div>
+        <div class="note info">
+          <span class="t">对数技巧为什么成立？</span>对任意正函数 \(f\)，\(\tfrac{d}{d\theta}\ln f = \tfrac{1}{f}\tfrac{df}{d\theta}\)，两边乘 \(f\) 得 \(\tfrac{df}{d\theta} = f\tfrac{d}{d\theta}\ln f\)。把 \(f\) 换成轨迹概率后有两个好处：
+          <ul class="clean" style="margin-top:6px">
+            <li><b>连乘变连加</b>：\(\pi_\theta(\tau) = \pi(s_0)\prod_t \pi_\theta(a_t|s_t)P(s_{t+1}|s_t,a_t)\) 取对数后，乘积法则自动退化为求和，且环境项 \(P\) 与初始分布不含 \(\theta\)，求导后整体消失。</li>
+            <li><b>留下的 \(\pi_\theta(\tau)\) 恰好充当期望的权重</b>：整式才能写回 \(\mathbb{E}_\tau[\cdot]\)，从而可以用蒙特卡洛采样近似。</li>
+          </ul>
+          一句话：<b>log 不是魔法，是把「对分布求导」翻译成「对网络输出求导」的桥梁。</b>
+        </div>
+
+        <h3>2.3 用优势代替回报</h3>
+        <p>直接用整局回报 \(R(\tau)\) 作为系数，会带来很大的方差（Variance）：同一局里好动作和坏动作被一视同仁地乘以同一个数。业界标准做法是把它替换为<b>优势函数</b> \(\hat{A}(s_t,a_t)\)——「这个动作比平均水平好多少」。这个替换不改变梯度的期望（因为对 \(a_t\) 求平均后优势为零），但大幅降低方差。于是得到最终形式：</p>
+        <div class="formula dark">
+          <div class="label">策略梯度定理（优势形式）</div>
+          <div class="txt">\[
+          \nabla_\theta J(\theta) = \mathbb{E}\Big[ \underbrace{\hat{A}(s_t,a_t)}_{\text{这个动作比平均好多少}} \cdot \underbrace{\nabla_\theta \log \pi_\theta(a_t\mid s_t)}_{\text{抬高该动作概率的方向}} \Big]
+          \]</div>
+        </div>
+        <p>直观含义非常干净：<b>评估每个动作「比平均好多少」，然后朝「提升该动作概率」的方向走一步。</b>优势为正就抬概率，为负就压概率。</p>
+
+        <div class="note key"><span class="t">推理关键点：</span>环境转移 \(P\) 完全消失，意味着算法<b>不需要环境模型</b>——只需网络自己的输出 \(\log \pi_\theta(a|s)\) 就能算梯度。这就是「无模型（model-free）强化学习」的数学基础。</div>
+        <p class="muted" style="text-align:right;margin-top:8px">问题来了：\(\hat{A}\) 到底怎么算？这正是下一节的主题 →</p>
+      </div>
+    </section>
+
+    <!-- ==================== 03 方差控制 ==================== -->
+    <section id="s3">
+      <div class="panel">
+        <h2><span class="no">03</span>方差控制：价值函数与 GAE</h2>
+        <p>上一节的梯度公式需要一个量：<b>「这个动作比平均水平好多少」</b>，即优势 \(\hat{A}\)。本节从「单步奖励不够用」说起，逐步推导出 GAE（Generalized Advantage Estimation）。</p>
+
+        <h3>3.1 信用分配问题：单步奖励的局限</h3>
+        <p>直觉上，有人会直接用单步奖励 \(r_t\) 当「好坏」信号。看一个贪吃蛇实例：蛇头在 (4,6) 朝右，食物在 (8,2)。它必须连续右转再向上绕路 5 步才能吃到食物，中间每一步奖励都是 \(-0.02\)，直到第 6 步才 +20。<b>这份 +20 的功劳，该记在哪一步头上？</b>只盯着单步奖励，AI 永远学不会「绕路」这种有远见的行为。</p>
+        <div class="note warn"><span class="t">本质：</span>这是强化学习的<b>信用分配（credit assignment）</b>问题——回报是整条轨迹共同产生的，但必须分摊到每一步的决策上。</div>
+
+        <h3>3.2 价值函数：对未来的估计</h3>
+        <p>解法是引入价值函数 \(V(s)\)：从状态 \(s\) 出发、按当前策略继续玩，<b>期望还能获得的总回报</b>。它由另一个网络（Critic）学习，是对未来的「预测值」。</p>
+        <div class="formula">
+          <div class="label">价值函数</div>
+          <div class="txt">\[ V^{\pi}(s) = \mathbb{E}_{\pi}\big[ G_t \mid s_t = s \big] \]</div>
+        </div>
+        <p>有了 \(V\)，可以定义<b>单步优势（TD 误差）</b>——「这一步实际发生的情况，比原以为的预期好/坏多少」：</p>
+        <div class="formula dark">
+          <div class="label">TD 误差</div>
+          <div class="txt">\[ \delta_t = r_t + \gamma V(s_{t+1}) - V(s_t) \]</div>
+        </div>
+        <ul class="clean">
+          <li><b>撞墙前最后一步</b>：\(r_t=-5\)，\(V(s_{t+1})=0\)（游戏结束），\(V(s_t)\) 偏高 → \(\delta_t\) 是很大的负数 → AI 学到「这条路不能再走」。</li>
+          <li><b>朝食物绕路的一步</b>：即使 \(r_t=-0.02\)，只要下一步状态离食物更近（\(V(s_{t+1})>V(s_t)\)），\(\delta_t\) 依然为正 → 这次转弯被记成「好」。绕路的远见性由此产生。</li>
+        </ul>
+
+        <h3>3.3 GAE：把多步「意外」累积成真正的优势</h3>
+        <p>\(\delta_t\) 只反映「这一瞬间」的意外，但一个好动作的影响会延续多步。GAE 的核心：<b>把未来多步的 TD 误差按衰减系数 \(\gamma\lambda\) 累加</b>，\(\lambda\) 决定「到底看多远」。</p>
+        <div class="formula dark">
+          <div class="label">GAE 优势估计（本仓库 \(\gamma=0.99,\ \lambda=0.95\)）</div>
+          <div class="txt">\[ \hat{A}_t = \delta_t + \gamma\lambda\,\delta_{t+1} + (\gamma\lambda)^2 \delta_{t+2} + \cdots = \sum_{l=0}^{\infty} (\gamma\lambda)^{l}\,\delta_{t+l} \]</div>
+        </div>
+        <p>\(\lambda\) 越小越「短视」（主要看眼前几步，方差小但可能有偏差），越大越「远视」（看完整局，看得全但方差大）。拖动滑块观察 \(\lambda\) 如何决定「未来每一步意外」在当前优势里的权重：</p>
+        <div class="ctrl">
+          <div class="slider-group">
+            <label>λ（方差-偏差权衡）</label>
+            <input type="range" id="gaeLam" min="0" max="1" step="0.05" value="0.95">
+            <span class="slider-val" id="gaeLamVal">0.95</span>
+          </div>
+        </div>
+        <canvas id="gaeChart" class="plot" height="280"></canvas>
+        <div class="chart-cap">横轴 = 当前动作之后第 l 步 · 纵轴 = 该步 TD 误差的权重 \((\gamma\lambda)^l\)</div>
+
+        <div class="note info">
+          <span class="t">两端极限：</span>\(\lambda=0\) 时 \(\hat{A}_t=\delta_t\)，只用一步；\(\lambda=1\) 时退化为「完整蒙特卡洛回报减基线」，看完全局。中间值在偏差与方差之间取平衡，0.95 是强化学习社区的常用默认。
+        </div>
+        <p class="muted" style="text-align:right;margin-top:8px">优势已算好。下一个问题：策略更新时，怎么保证不把策略「一步推崩」？→</p>
+      </div>
+    </section>
+
+    <!-- ==================== 04 更新稳定 ==================== -->
+    <section id="s4">
+      <div class="panel">
+        <h2><span class="no">04</span>更新稳定：重要性采样与 PPO-Clip</h2>
+        <p>策略梯度公式要求数据来自<b>当前</b>策略。但每更新一次，参数就变了，旧数据还能用吗？更重要的是：一次更新把策略推得太狠，训练会瞬间崩溃。本节解决这两个问题。</p>
+
+        <h3>4.1 重要性采样：新旧策略的「汇率」</h3>
+        <p>旧数据由旧策略 \(\pi_{\theta_{\text{old}}}\) 采样，而我们想优化新策略 \(\pi_\theta\)。直接用会<b>有偏</b>。数学上用一个比值修正：</p>
+        <div class="formula">
+          <div class="label">重要性采样比率</div>
+          <div class="txt">\[ \rho = \frac{\pi_\theta(a \mid s)}{\pi_{\theta_{\text{old}}}(a \mid s)} \]</div>
+        </div>
+        <p>它衡量「新策略比旧策略更偏爱这个动作多少倍」。如果「直行」在旧策略里概率 0.4、更新后变成 0.8，那么旧数据里所有「直行」样本就该按 2 倍加权（0.8/0.4）。这也正是 <code>train.py</code> 能在一批旧数据上反复跑多个 epoch 的数学依据。</p>
+
+        <h3>4.2 朴素的再平衡为什么危险</h3>
+        <p>有了 \(\rho\)，旧数据能复用了，但引来了新麻烦：如果新策略突然把某个动作概率从 0.1 顶到 0.9，\(\rho=9\)，一次更新就把策略「顶飞」——之后卡死在极端分布上，再也学不进去。朴素的修法是直接把 \(\rho\) 限制在 \([1-\varepsilon, 1+\varepsilon]\)，但那会引入偏差。</p>
+
+        <h3>4.3 PPO-Clip：目标函数的设计</h3>
+        <p>PPO 的答案非常优雅：用 \(\min\) 同时兼顾「能用旧数据」和「别走太远」——<b>只取两项里更保守的那个</b>：</p>
+        <div class="formula dark">
+          <div class="label">PPO-Clip 目标（本仓库实际使用的版本）</div>
+          <div class="txt">\[
+          \mathcal{L}^{\text{CLIP}}(\theta) = \mathbb{E}\Big[ \min\big( \rho \hat{A},\ \operatorname{clip}(\rho,\, 1-\varepsilon,\, 1+\varepsilon)\,\hat{A} \big) \Big]
+          \]</div>
+        </div>
+        <p>左项 \(\rho\hat{A}\) 是「完整信号」，右项是「上了安全阀的信号」，取 min 表示<b>只信更保守的那个</b>。关键是 clip 是<b>不对称</b>的——它只拦「越改越极端」的方向，不拦「往回收」的方向：</p>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th>情形</th><th>min 取哪项</th><th>含义</th></tr></thead>
+            <tbody>
+              <tr><td>\(\hat{A}>0,\ \rho>1+\varepsilon\)</td><td>\((1+\varepsilon)\hat{A}\)（截平）</td><td>好动作被抬得太猛，摁住，防一次顶爆</td></tr>
+              <tr class="odd"><td>\(\hat{A}>0,\ \rho<1-\varepsilon\)</td><td>\(\rho\hat{A}\)（不截平）</td><td>好动作概率在回落？不拦，梯度照常给</td></tr>
+              <tr><td>\(\hat{A}<0,\ \rho<1-\varepsilon\)</td><td>\((1-\varepsilon)\hat{A}\)（截平）</td><td>坏动作被压得太狠，摁住，防一次压死</td></tr>
+              <tr class="odd"><td>\(\hat{A}<0,\ \rho>1+\varepsilon\)</td><td>\(\rho\hat{A}\)（不截平）</td><td>坏动作概率在升高？不拦，惩罚照常给</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>下面把两种情况画出来。拖动圆点改变 \(\rho\)，对比「好动作」与「坏动作」下目标的几何形状：</p>
+        <div class="ctrl">
+          <button class="btn active" id="modePos">好动作 A &gt; 0</button>
+          <button class="btn" id="modeNeg">坏动作 A &lt; 0</button>
+          <div class="slider-group">
+            <label>ε</label>
+            <input type="range" id="clipEps" min="0.05" max="0.5" step="0.01" value="0.2">
+            <span class="slider-val" id="clipEpsVal">0.20</span>
+          </div>
+        </div>
+        <canvas id="clipChart" class="plot" height="320"></canvas>
+        <div class="chart-cap" id="clipCaption"></div>
+        <div class="legend">
+          <span class="item"><span class="sw" style="background:#a3aec6"></span>未裁剪 \(\rho A\)</span>
+          <span class="item"><span class="sw" style="background:#d97706"></span>裁剪 \(\mathrm{clip}(\rho)A\)</span>
+          <span class="item"><span class="sw" style="background:#2563eb"></span>目标 \(\min(\cdot)\)</span>
+          <span class="item"><span class="sw dot" style="background:#e11d48"></span>当前 \(\rho\)</span>
+        </div>
+        <div class="note info" id="clipExplain" style="margin-top:10px"></div>
+
+        <h3>4.4 完整的损失：策略 + 价值 + 熵</h3>
+        <p>最终每次更新最小化三部分损失的加权和：</p>
+        <div class="formula">
+          <div class="label">总损失</div>
+          <div class="txt">\[
+          \mathcal{L} = \underbrace{-\mathbb{E}[\min(\rho\hat{A},\ \mathrm{clip}(\rho)\hat{A})]}_{\text{策略损失}}\;+\; c_v\, \mathbb{E}\big[(V_\theta - G)^2\big]\;-\; c_e\, \mathbb{E}[\,\mathcal{H}(\pi_\theta)\,]
+          \]</div>
+        </div>
+        <ul class="clean">
+          <li><b>策略损失</b>：PPO-Clip 目标，让好动作概率上升、坏动作下降。</li>
+          <li><b>价值损失</b>：Critic 学得更准，\((V - G)^2\) 回归到真实回报 \(G\)。</li>
+          <li><b>熵正则</b>：\(\mathcal{H}(\pi)\) 鼓励策略保持随机、持续探索，防止过早塌缩成确定性策略。系数 \(c_e\) 从 0.08 线性衰减到 0.008（§8）。</li>
+        </ul>
+        <p class="muted" style="text-align:right;margin-top:8px">四个齿轮已就位。把它们咬合成一次完整迭代 →</p>
+      </div>
+    </section>
+
+    <!-- ==================== 05 完整算法 ==================== -->
+    <section id="s5">
+      <div class="panel">
+        <h2><span class="no">05</span>完整算法：一次训练迭代的闭环</h2>
+        <p>把前三节的组件拼起来，一次 PPO 迭代包含五个阶段。下面用动画演示这个闭环，并用数字标注本仓库的具体配置：</p>
+
+        <div class="ctrl">
+          <button class="btn active" id="loopPlay">▶ 自动播放</button>
+          <button class="btn" id="loopStep">⏭ 下一步</button>
+          <span class="muted" id="loopIndex" style="font-size:12.5px">步骤 0 / 8</span>
+        </div>
+        <div class="loop-grid" id="loopGrid"></div>
+
+        <div class="note info" style="margin-top:14px">
+          <span class="t">本仓库的每次迭代：</span>
+          <b>48 个环境</b>并行采样 <b>200 步</b> → 约 <b>9600 条</b> (s, a, logp, r) 样本 → GAE 计算优势（γ=0.99, λ=0.95）→ 优势归一化并裁剪到 [-3, 3] → 在旧数据上跑 <b>6 个 epoch</b>、每个 epoch 内 <b>512 小批量</b> → 学习率与熵系数线性衰减。
+        </div>
+
+        <h3>5.1 为什么是 on-policy 却被反复使用数据？</h3>
+        <p>严格地说 PPO 是 on-policy：每轮更新完，旧数据就要作废（因为 \(\rho\) 会随策略偏离而失真）。但 clip 允许「小步偏离」而不惩罚，所以同批数据可以安全地复用几个 epoch。这兼顾了数据效率与更新安全。</p>
+
+        <div class="note key">
+          <span class="t">Actor 与 Critic 的协作：</span>Actor 输出动作概率，Critic 输出价值估计。Critic 越准，GAE 算出的优势越可信，Actor 学得越好；Actor 策略越好，采到的数据越有价值，Critic 也越容易学准。<b>互相喂料、共同进化。</b>（新版训练把 Critic 换成独立小网络，价值梯度不再干扰策略梯度，详见 §8。）
+        </div>
+        <p class="muted" style="text-align:right;margin-top:8px">算法成立的前提是「信息质量」。环境怎么设计？→</p>
+      </div>
+    </section>
+
+    <!-- ==================== 06 环境工程 ==================== -->
+    <section id="s6">
+      <div class="panel">
+        <h2><span class="no">06</span>环境工程：状态与奖励</h2>
+        <p>这一节是本项目「最被低估」的部分。<b>喂给算法的信息质量，往往比算法本身更能决定成败。</b>这个项目是这句话的最佳注脚。</p>
+
+        <h3>6.1 21 维状态特征</h3>
+        <p>AI 看不到画面，只能看到 21 个数字。特征按「局部危险 → 相对目标 → 全局空间」三个层次设计：</p>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th style="width:46px">索引</th><th style="width:110px">特征</th><th>含义与设计动机</th></tr></thead>
+            <tbody>
+              <tr><td>0–2</td><td>三向危险</td><td>直行/左转/右转是否立即撞墙或撞身体（最基础的生存信号）</td></tr>
+              <tr class="odd"><td>3–6</td><td>食物相对方向</td><td>食物在正前/左/右/后（one-hot，沿该方向走是否必达）</td></tr>
+              <tr><td>7–10</td><td>当前朝向</td><td>蛇头朝上/下/左/右（one-hot，让网络知道「我在往哪走」）</td></tr>
+              <tr class="odd"><td>11–13</td><td>到墙距离</td><td>正前/左/右距墙格数（归一化，比布尔「危险」更精细）</td></tr>
+              <tr><td>14</td><td>食物距离</td><td>到食物的曼哈顿距离（归一化），连续量让「远近」可比</td></tr>
+              <tr class="odd"><td>15</td><td>蛇身长度</td><td>身长/总格数，感知「我占了多少空间」</td></tr>
+              <tr><td>16–18</td><td>安全通道长度</td><td>正前/左/右还能安全走几格（归一化）——长蛇生存的关键连续量</td></tr>
+              <tr class="odd"><td>19</td><td>自由空间比例</td><td>剩余空格/总格数，衡量「会不会把自己困死」</td></tr>
+              <tr><td>20</td><td>头部被困程度</td><td>蛇头周围一圈（含对角）被占比例，直接告诉 AI「头是否被包围」</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="note key">
+          <span class="t">版本迭代故事（真实）：</span>第一版只有 11 维特征（危险+食物方向+朝向），AI 死活学不会，永远在身长 3 原地转圈。加入「到墙距离、食物距离、蛇长」5 维后，同样超参数下迅速突破到 20+ 食物。后来为了让长蛇期不钻死胡同，又加了「安全通道长度、自由空间比例、头部被困」5 维<b>全局空间感知</b>，身长上限从 25 提升到 40+。<b>先设计信息，再调算法——这是本项目最重要的经验。</b>
+        </div>
+
+        <h3>6.2 奖励函数：稀疏奖励的塑形</h3>
+        <p>最初只设「吃 +20、撞 −5」两种奖励，AI 完全学不会。原因很直接：随机策略每局平均只能活 15 步，几乎永远碰不到食物，「+20」这个唯一的好信号在几万步训练里一次都没出现过。</p>
+        <p>解法是 potential-based shaping（势能塑形）：把奖励从「稀疏」变成「稠密」，同时<b>不改变问题的最优策略</b>。完整表达式（<code>src/snake_game.py</code>）：</p>
+        <div class="formula dark">
+          <div class="label">每步奖励（未结束且未吃食物时）</div>
+          <div class="txt">\[ r_t = \underbrace{-0.02}_{\text{步数惩罚}} \;+\; \underbrace{1.5\,(d_{\text{old}} - d_{\text{new}})}_{\text{靠近食物}} \;+\; \underbrace{0.02\,(\mathrm{reach}_{\text{new}} - \mathrm{reach}_{\text{old}})}_{\text{可达空间（仅身长}\ge 6\text{）}} \]</div>
+        </div>
+        <ul class="clean">
+          <li><b>步数惩罚 −0.02</b>：催促尽快吃到食物，防绕圈。</li>
+          <li><b>靠近食物 +1.5/格</b>：比上一步离食物更近就立刻有正奖励，让「追食物」成为可学习的密集信号。</li>
+          <li><b>可达空间 +0.02/格</b>：蛇长 ≥6 时启用，奖励「一步后可达空间变大」——教蛇别钻进自己围出的口袋，是身长上限从 25 提到 40+ 的关键。</li>
+        </ul>
+        <div class="note info">
+          <span class="t">为什么不直接给「离食物越近分越高」？</span>那会教出原地绕圈的「假把式」。这里用的是 potential-based shaping：奖励只取决于<b>距离的变化量</b>而非绝对值。数学上可以证明这类塑形<b>不改变最优策略</b>，只是把稀疏信号变稠密，让学习顺滑。
+        </div>
+
+        <h3>6.3 撞墙与撞身体分开计分</h3>
+        <p>代码里撞墙和撞自己同为 −5（不再区分），步数超限（绕圈）给温和 −0.5。撞自己 −8 的旧版因惩罚过重反而破坏探索，已回退为 −5 与撞墙一致。</p>
+        <p class="muted" style="text-align:right;margin-top:8px">环境定义完毕。这套 MDP 在纯 NumPy 里怎么写？→</p>
+      </div>
+    </section>
+
+    <!-- ==================== 07 纯 NumPy 实现 ==================== -->
+    <section id="s7">
+      <div class="panel">
+        <h2><span class="no">07</span>纯 NumPy 实现</h2>
+        <p>整个项目只有 4 个核心 Python 文件、约 550 行代码。最特别的是——<b>连反向传播和 Adam 优化器都是手写的</b>，没有任何「魔法」。</p>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th style="width:170px">文件</th><th>职责</th><th style="width:100px">体量</th></tr></thead>
+            <tbody>
+              <tr><td><code>src/snake_game.py</code></td><td>环境：12×12 网格、21 维状态、奖励、回合逻辑</td><td>~110 行</td></tr>
+              <tr class="odd"><td><code>src/ppo.py</code></td><td>MLP 策略网络、手写反向传播、Adam、PPO-Clip、GAE、BC</td><td>~215 行</td></tr>
+              <tr><td><code>src/pretrain.py</code></td><td>行为克隆预热：启发式专家数据监督训练初始策略</td><td>~130 行</td></tr>
+              <tr class="odd"><td><code>scripts/train.py</code></td><td>训练入口：向量化采样、主循环、超参调度、多种子</td><td>~160 行</td></tr>
+              <tr><td><code>scripts/play.py</code></td><td>加载模型，终端 ASCII 动画演示自动玩</td><td>~50 行</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>7.1 网络结构与前向传播</h3>
+        <p>两层 MLP：输入 21 维 → tanh 隐藏层 64 → 策略头 3 个 logits + 价值头 1 个标量。权重用 Xavier/He 风格初始化。</p>
+<pre class="code"><span class="k">def</span> <span class="f">forward</span>(self, x):
+    h = np.tanh(x @ self.W1 + self.b1)              <span class="c"># (B, 64)</span>
+    logits = h @ self.W2p + self.b2p                <span class="c"># 策略 logits (B, 3)</span>
+    value  = (h @ self.W2v + self.b2v).squeeze(-1)  <span class="c"># 价值 (B,)</span>
+    <span class="k">return</span> logits, value, h</pre>
+
+        <h3>7.2 PPO-Clip 更新：一次完整的前向+反向</h3>
+        <p>这是整个项目的心脏。一次性完成「前向 → 比率 → clip → 三路损失 → 手写反向传播 → Adam 更新」：</p>
+<pre class="code"><span class="k">def</span> <span class="f">_compute_update</span>(net, opt, S, A, old_logp, adv, ret, clip_eps, ent_coef, val_coef):
+    B = len(S)
+    h = np.tanh(S @ net.W1 + net.b1)
+    logits = h @ net.W2p + net.b2p
+    value  = (h @ net.W2v + net.b2v).squeeze(-1)
+    probs  = softmax(logits)
+    logp   = np.log(np.clip(probs[np.arange(B), A], <span class="n">1e-12</span>, <span class="n">1.0</span>))
+
+    rho = np.exp(logp - old_logp)                     <span class="c"># 重要性采样比率</span>
+    rho_clipped = np.clip(rho, <span class="n">1</span>-clip_eps, <span class="n">1</span>+clip_eps)
+    p_obj = np.minimum(rho*adv, rho_clipped*adv)      <span class="c"># PPO-Clip 目标</span>
+    pol_loss = -p_obj.mean()
+    entropy  = -(probs*np.log(np.clip(probs, <span class="n">1e-12</span>, <span class="n">1.0</span>))).sum(axis=<span class="n">1</span>)
+    ent_loss = -entropy.mean()                        <span class="c"># 熵正则</span>
+    val_loss = ((value - ret)**<span class="n">2</span>).mean()            <span class="c"># 价值回归</span>
+
+    <span class="c"># ---- 手写反向传播 ----</span>
+    onehot = np.zeros_like(probs); onehot[np.arange(B), A] = <span class="n">1</span>
+    use_clip = ((adv&gt;<span class="n">0</span>)&amp;(rho&gt;<span class="n">1</span>+clip_eps))|((adv&lt;<span class="n">0</span>)&amp;(rho&lt;<span class="n">1</span>-clip_eps))
+    eff = np.where(use_clip, rho_clipped, rho)        <span class="c"># 被 clip 住的部分梯度为 0</span>
+    g_logits = eff[:,None]*adv[:,None]*(probs-onehot)/B   <span class="c"># 策略梯度</span>
+    g_ent    = ent_coef*probs*(entropy[:,None]+np.log(np.clip(probs,<span class="n">1e-12</span>,<span class="n">1.0</span>)))/B
+    g_val    = val_coef*<span class="n">2</span>*(value-ret)/B
+    g_h = g_logits @ net.W2p.T + g_val[:,None] @ net.W2v.T
+    g_h *= (<span class="n">1</span>-h*h)                                <span class="c"># tanh 导数</span>
+    opt.step([S.T@g_h, g_h.sum(<span class="n">0</span>), h.T@g_logits, g_logits.sum(<span class="n">0</span>),
+              h.T@(g_val[:,None]), g_val.sum()])      <span class="c"># Adam 更新</span></pre>
+
+        <div class="note key">
+          <span class="t">怎么保证手写反向传播是对的？</span>用「数值梯度校验」逐参数验证：对每个权重做微小扰动，比较解析梯度与中心差分 \((L(\theta+\epsilon)-L(\theta-\epsilon))/2\epsilon\)，误差达到 <b>1e-10 量级</b>。这是所有手写深度学习代码的「试金石」。
+        </div>
+
+        <h3>7.3 GAE：从后向前回溯「意外之喜」</h3>
+<pre class="code"><span class="k">def</span> <span class="f">compute_gae</span>(rewards, values, dones, next_values, gamma=<span class="n">0.99</span>, lam=<span class="n">0.95</span>):
+    advantages = np.zeros_like(rewards)
+    gae = <span class="n">0.0</span>
+    <span class="k">for</span> t <span class="k">in</span> reversed(range(len(rewards))):       <span class="c"># 从后往前递推</span>
+        delta = rewards[t] + gamma*next_values[t]*(<span class="n">1</span>-dones[t]) - values[t]
+        gae = delta + gamma*lam*(<span class="n">1</span>-dones[t])*gae
+        advantages[t] = gae
+    <span class="k">return</span> advantages, advantages + values        <span class="c"># returns 供 Critic 回归</span></pre>
+        <p class="muted" style="text-align:right;margin-top:8px">代码能跑，但为什么「直接训练」学不会？训练系统的三个关键决策 →</p>
+      </div>
+    </section>
+
+    <!-- ==================== 08 训练系统 ==================== -->
+    <section id="s8">
+      <div class="panel">
+        <h2><span class="no">08</span>训练系统与稳定策略</h2>
+        <p>把零件组装起来后，真实训练中会遇到三个几乎必翻的坑。本仓库的「稳定三件套」逐一解决它们，每个决策都有动机与证据。</p>
+
+        <h3>8.1 坑一：强化学习很「玄学」——随机种子决定成败</h3>
+        <p>同一个算法换随机种子，结果可能天差地别。旧版从随机初始化开始训练，成功率仅约 <b>12%</b>——90% 的种子在训练早期「塌缩」成永远直行的死策略。根源：随机初始化从均匀分布出发，能否偶然碰到食物取决于运气（正样本率仅约 0.03%）。</p>
+        <div class="note key">
+          <span class="t">解法一：行为克隆（BC）预热</span>先用启发式专家打局收集 (状态, 动作) 数据，监督训练初始策略，让它「天生就会追食物、避障碍」，再交给 PPO 微调。成功率从 ~12% 提升到 <b>100%</b>。原理：BC 给了一个「好的起点」，PPO 只需做小步改进，不再依赖撞大运。
+        </div>
+
+        <h3>8.2 坑二：价值梯度干扰策略——共享隐藏层的隐患</h3>
+        <p>默认结构里 Actor 与 Critic 共享隐藏层。价值回归梯度（想让预测准）与策略梯度（想让动作概率对）会<b>互相拉扯</b>，导致训练不稳。解法是 <b>独立 Critic</b>：价值头使用自己的隐藏层（<code>W1v</code>），两条梯度彻底解耦。</p>
+
+        <h3>8.3 坑三：学习率太大——一步把策略推成 one-hot</h3>
+        <p>大学习率（如 3e-3）一次更新就能把策略从温和推成「永远直行」的极端分布（KL 散度暴涨到 7+），之后永久卡死。解法是 <b>小学习率 3e-4 + 线性衰减</b>（前 80% 轮线性衰减到 10%），每次只走一小步，KL 稳定在温和区间。同时熵系数从 0.08 线性衰减到 0.008，前期保探索、后期促收敛。</p>
+
+        <h3>8.4 超参数一览</h3>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th>超参数</th><th style="width:80px">取值</th><th>作用</th></tr></thead>
+            <tbody>
+              <tr><td>\(\gamma\)（折扣）</td><td>0.99</td><td>未来回报折算</td></tr>
+              <tr class="odd"><td>\(\lambda\)（GAE）</td><td>0.95</td><td>偏差/方差平衡</td></tr>
+              <tr><td>\(\varepsilon\)（clip）</td><td>0.2</td><td>单次更新最大偏离</td></tr>
+              <tr class="odd"><td>lr</td><td>3e-4</td><td>小步慢走，防 one-hot 塌缩</td></tr>
+              <tr><td>隐藏层</td><td>64</td><td>网络宽度</td></tr>
+              <tr class="odd"><td>内层 epoch</td><td>6</td><td>每批数据训练遍数</td></tr>
+              <tr><td>mini-batch</td><td>512</td><td>小批量大小</td></tr>
+              <tr class="odd"><td>熵系数</td><td>0.08→0.008</td><td>前期探索后期收敛</td></tr>
+              <tr><td>并行环境</td><td>48</td><td>采样吞吐</td></tr>
+              <tr class="odd"><td>rollout 步数</td><td>200</td><td>每轮采样长度</td></tr>
+              <tr><td>BC 预热</td><td>40 轮</td><td>消除种子敏感性</td></tr>
+              <tr class="odd"><td>优势处理</td><td>归一化+裁剪</td><td>减均值除方差，裁剪到 [-3,3]</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="muted" style="text-align:right;margin-top:8px">这么多设计决策，实际效果如何？看真实实验证据 →</p>
+      </div>
+    </section>
+
+    <!-- ==================== 09 实验证据 ==================== -->
+    <section id="s9">
+      <div class="panel">
+        <h2><span class="no">09</span>实验证据</h2>
+        <p>下面是真实训练 500 轮（seed=2，BC 预热 + 独立 Critic + 小学习率）的记录。数据取自 <code>logs/full_curve.csv</code>，没有做任何平滑或美化。</p>
+
+        <h3>9.1 学习曲线与 KL 动态</h3>
+        <canvas id="trainChart" class="plot" height="380"></canvas>
+        <div class="legend">
+          <span class="item"><span class="sw" style="background:#2563eb"></span>评估得分（每 10 轮，左轴）</span>
+          <span class="item"><span class="sw" style="background:#d97706"></span>每轮 KL 散度（右轴）</span>
+          <span class="item"><span class="sw" style="background:#059669"></span>启发式基线 ≈ +590</span>
+        </div>
+        <div class="chart-cap">BC 预热让策略一开局就会「追食物」，得分直接从 +132 起步（随机初始化起步是 −5）。橙色 KL 前期的尖峰对应策略试探新走法，尖峰过后得分上一个台阶；后期 KL 收敛到 0.001 以下，策略稳定。</div>
+
+        <h3>9.2 关键数字（模型实测，非图表读取）</h3>
+        <p>对最终模型 <code>checkpoint/best_snake.json</code> 独立跑 100 局得到的真实统计：</p>
+        <div class="kpi-grid">
+          <div class="kpi"><div class="k">平均得分</div><div class="v">+880</div></div>
+          <div class="kpi"><div class="k">平均食物</div><div class="v">29.8</div></div>
+          <div class="kpi"><div class="k">平均身长</div><div class="v">32.8</div></div>
+          <div class="kpi"><div class="k">平均存活步数</div><div class="v">666</div></div>
+          <div class="kpi"><div class="k">单局最高身长</div><div class="v">40</div></div>
+        </div>
+        <div class="note key">
+          <span class="t">与启发式对照：</span>贪心启发式（每步朝离食物最近的安全方向走）平均得分约 +590、吃约 20 个食物。PPO 训练出的策略平均吃 <b>29.8</b> 个食物、身长 <b>32.8</b>，顶峰高出 45% 以上——而且它<b>完全是从经验里学出来的</b>，代码里没有任何一条「怎么玩贪吃蛇」的规则。
+        </div>
+
+        <h3>9.3 眼见为实：浏览器里实时推理</h3>
+        <p>「AI 自动玩」把训练好的网络权重（约 3.1k 参数）直接内嵌在本页，由浏览器里的 JavaScript 实时做前向推理——每一步现场提取 21 维状态、算三个动作概率并采样。所以每次点击都是一局<b>全新的实时对局</b>，不是播放录像。你也可以用方向键手动玩，感受「学出来的策略」和直觉的差异。</p>
+
+        <div class="game-wrap">
+          <div class="snake-board">
+            <canvas id="gameCanvas" width="460" height="460"></canvas>
+          </div>
+          <div class="game-side">
+            <div class="game-stats">
+              <div class="gs"><div class="k">得分</div><div class="v" id="gScore">0</div></div>
+              <div class="gs"><div class="k">食物</div><div class="v" id="gFood">0</div></div>
+              <div class="gs"><div class="k">身长</div><div class="v" id="gLen">3</div></div>
+              <div class="gs"><div class="k">状态</div><div class="v small" id="gStatus">按方向键开始</div></div>
+            </div>
+            <div class="ctrl">
+              <button class="btn" id="gameRestart">↺ 重新开始</button>
+              <button class="btn" id="gameAI">🤖 AI 自动玩</button>
+            </div>
+            <div class="note info" style="margin-top:8px"><span class="t">说明：</span>AI 权重由 <code>scripts/train.py</code> 训练结束后自动内嵌（<code>--embed-only</code> 可手动同步）。当前页面的 AI 就是最新训练出的那个模型。</div>
+          </div>
+        </div>
+
+        <h3>9.4 阶段解读</h3>
+        <div class="kpi-grid" style="grid-template-columns:1fr">
+          <div class="kpi" style="text-align:left;display:flex;gap:14px;align-items:center">
+            <div style="flex:1"><b>① 快速起步（0–60 轮）</b>：BC 预热让策略一开局就会「追食物+避障碍」，得分直接从 +132 起步，快速抬到 +470。</div>
+          </div>
+        </div>
+        <div class="kpi-grid">
+          <div class="kpi" style="text-align:left"><b>② 持续爬坡（60–250 轮）</b>：每 10 轮稳定爬升约 +20，从「会吃食物」进化到「会绕开身体走位」，身长从 12 冲到 22+。</div>
+          <div class="kpi" style="text-align:left"><b>③ 高位平台（250–500 轮）</b>：稳定在 +600~+780，最高单轮 +775。AI 学会了避墙、绕身、主动追食物。</div>
+        </div>
+        <p class="muted" style="text-align:right;margin-top:8px">想亲手复现这一切？→</p>
+      </div>
+    </section>
+
+    <!-- ==================== 10 复现与延伸 ==================== -->
+    <section id="s10">
+      <div class="panel">
+        <h2><span class="no">10</span>复现与延伸</h2>
+
+        <h3>10.1 复现步骤</h3>
+        <p>项目就在本页同级的 <code>projects/ppo-snake/</code> 目录，只需 NumPy：</p>
+<pre class="code">pip install numpy
+
+<span class="c"># 训练（约 12~15 分钟；稳定三件套：BC预热 + 独立Critic + 小学习率）</span>
+python scripts/train.py --pretrain --separate-critic --iters 500 --seeds 2
+
+<span class="c"># 终端 ASCII 动画演示 AI 自动玩</span>
+python scripts/play.py --separate-critic --episodes 20
+
+<span class="c"># 环境自测（随机策略基线）</span>
+python src/snake_game.py</pre>
+
+        <div class="note info">
+          <span class="t">实验建议（亲手破坏一个环节，是理解算法最快的办法）：</span>
+          ① 去掉 <code>--pretrain</code>，看成功率如何骤降（体会种子敏感性）；② 把 shaping 系数改成 0，看稀疏奖励下 AI 有多难学；③ 把 <code>clip_eps</code> 改成 1.0，看更新不再受限后训练如何震荡；④ 把 <code>--n-envs</code> 从 48 降到 8，体会并行采样对速度的价值。
+        </div>
+
+        <h3>10.2 从贪吃蛇到 ChatGPT：RLHF 里的 PPO</h3>
+        <p>理解了这套系统后，你会发现大模型 RLHF 训练里那套 Actor / Reference / Reward / Critic 四模型架构，本质就是这里的贪吃蛇换个场景：</p>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th style="width:130px">贪吃蛇项目</th><th>RLHF（大模型对齐）</th></tr></thead>
+            <tbody>
+              <tr><td>21 维状态特征</td><td>Prompt + 模型输出序列</td></tr>
+              <tr class="odd"><td>吃食物 +20</td><td>Reward Model 打分（人类偏好）</td></tr>
+              <tr><td>potential-based shaping</td><td>KL 惩罚：限制与 Reference 模型的偏离</td></tr>
+              <tr class="odd"><td>PPO-Clip 更新策略</td><td>同样的 PPO-Clip 更新生成模型</td></tr>
+              <tr><td>GAE + Critic</td><td>同样的优势估计与价值网络</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p><b>算法内核一模一样。</b>在 12×12 网格上学懂「转弯、避障、追食」，和在大模型上学会「输出符合人类偏好的回答」，共享同一套数学骨架。</p>
+
+        <h3>10.3 小结</h3>
+        <p>把整篇文章压缩成一句话：<b>PPO = 目标函数（期望回报）+ 优势（GAE）+ 安全更新（重要性采样 × Clip）</b>。而让这个算法在贪吃蛇上真正跑出好成绩的，是信息设计（21 维特征、奖励塑形）与工程决策（BC 预热、独立 Critic、小学习率）的共同作用——两者缺一不可。</p>
+        <div class="formula dark">
+          <div class="label">一页纸公式</div>
+          <div class="txt">\[
+          \max_\theta\ \mathbb{E}\Big[\min\big(\rho\,\hat{A},\ \mathrm{clip}(\rho, 1\pm\varepsilon)\,\hat{A}\big)\Big]
+          \quad\text{其中}\quad
+          \hat{A}_t=\sum_l(\gamma\lambda)^l\,\delta_{t+l}
+          \]</div>
+        </div>
+      </div>
+    </section>
+
+    <div class="footer">PPO 完整推导与工程实现 · Python + NumPy 手写 · 全部数据来自本仓库真实运行结果 · v3</div>
+  </main>
+</div>
+
+<script>
+/* 浏览器内实时运行的策略网络权重（由 scripts/train.py 训练结束后自动从 checkpoint/best_snake.json 内嵌） */
+var AI_MODEL = {"h":64,"na":3,"W1":[[-0.2699499433799786,1.058932975365049,1.1265264332164413,0.6301656379318443,-0.2152188898687155,0.12053405039104899,0.35350474908838575,-0.09547448872301578,0.8177274875777287,0.8931744620176635,-0.39819673365365876,0.05788129668990716,-0.048647492193753424,0.1340838875081338,-0.2773678389412434,-0.6171179489485951,0.6428947786564356,-0.18105850522198053,-0.5887022823071434,-0.7978465310198553,-0.5658337708181529,0.5037265049634082,0.05854642135035548,-0.21839231884086346,0.17125228587045974,-0.17428421787424384,-0.6231493616034943,0.15080022630980158,0.8985278116210396,1.229711331765712,0.5067893190289932,0.9042116615414092,0.35823533537187047,-0.7665881870793443,0.6369856603578726,-0.04475660003240485,0.8585655289478763,0.2989436102001645,0.7915522449678507,-0.10424447397788751,-0.6552283496524033,-0.9123940064652792,-0.6391030372743094,0.8439553129433989,-0.31334015089099093,0.07416014197791147,0.11743813909942453,1.0563826410231916,-1.1680803994206144,-0.022318221897427062,0.69867878833625,-0.35987878389974054,0.018307727786979956,0.09935817788000799,0.24813974241572345,0.3530208392896906,0.4995214869986621,0.7807364096794454,-0.19001114462607196,0.24553051620958916,-0.0568349040861619,-0.63075486786953,0.18011445356295186,-1.3272687637322391],[0.2696778354755967,-0.3327118494497449,-0.8313822796421547,-0.011730920151792943,-0.21035833904916795,0.1169436144627138,-0.33007584278671354,0.516420779502405,0.4005173284229902,-0.39208112282878443,-0.2089383676163248,0.22089056935461973,0.11382563749276745,-0.13632272164593276,-0.4622600921877462,0.5112729192978903,-0.613666748144395,-0.10311627283526865,0.4159228393306694,-0.2228774621363716,0.8480956210829607,0.2675131944664539,0.678650821493923,-0.30290641578068667,-0.22555759301549846,-0.02020737801672678,0.24875051918105587,0.39754228808212266,-0.04247914716545921,0.12093691555940556,-0.18337820685571546,0.11087180264249975,0.2019289643910347,0.2819007655966349,-0.15709143827506464,0.3414547969112302,0.22914815706705155,-0.5910133661544469,-0.3526869127330885,0.666257326867639,0.1994007269126798,0.7159806358268441,0.1629375679793806,-0.4268370793067324,0.5056387307236495,0.21016077051086202,0.6046211178777123,0.08150008068019991,-0.10873339228835951,0.8976719818083165,-0.2902308842894755,0.4606476624479041,0.7573899611154178,0.11085239267511425,0.3302157337235323,0.5195712514329399,0.17889870472942881,-0.6444843088666077,0.46555247981746545,0.39307644867692054,-0.595225508834778,0.5449390694987496,-0.6888327218254781,0.8352172172265735],[0.07967074253858543,0.24717855703020764,-0.20991690850500336,0.6672869084683758,-0.036611822425623976,-0.5737669270711891,-0.04783993937550046,-0.07617847620568195,-0.03809742257029223,-0.1819875346205528,0.6888743565594304,-0.6557678575309153,-0.6863943006176215,0.5969569942441129,0.379214969435568,0.29855141243709193,1.1256691324958417,0.7471819855684134,-0.2329552722383689,0.14258343778550903,-0.7182926539286302,0.17715205858727562,-0.25545090782535596,1.0601079655091346,0.032113310493547986,0.16043719046636712,0.06650979341706285,-0.5608328552749237,0.03932661349970616,-0.7280828640082572,-0.45069578354106826,-0.25940154544925315,-0.5471881183633757,0.8941255651742384,-0.09917321932718035,-0.43051266667309585,-0.1917302628397961,0.44990887063079354,-0.4945357937487818,-0.848400430103723,0.42404008229331536,-0.03231447363164844,0.04197711674088793,0.5193969739444511,-0.023322353841477336,0.17740710671778073,-0.8075097418032309,0.19320375783948174,-0.1511002310046661,-0.7815876835445662,-0.05593773569119744,-0.43405077717178364,-0.5985830683307335,-0.8577313664123217,-0.9104822066919976,-1.2545886383260034,-0.23013022540113906,-0.21673639563209818,-0.615996829912962,-0.34845792467616177,0.1297347981500894,0.36002785287662914,-0.09662014558966814,0.2798440126445517],[0.4590001515637586,-0.7491043834442906,-0.21981842259945703,0.044729985024851454,0.7171122797008951,-0.18736532089329183,0.6161936472511929,0.34991452237732845,-0.46865914836799255,-0.5425024514984337,0.3691637266530728,0.4234936566463973,0.26967265281094,-0.2746132551360065,-0.210540849332656,0.08799143774645808,0.005344533628000801,-0.31004639281112906,0.7400945989446266,0.10146353100050995,-0.2663172947300716,-0.3073245551613964,-0.37019359868039364,0.013966099821169,0.4247762402289499,0.35827024424913545,1.0817316033699087,-0.20995470893797438,-0.756732423605846,-0.5172558882300934,-0.5704971274890984,-0.25203642405850313,-0.5849741945110118,0.2082290690996467,-0.30724967111833706,0.02642154058608364,-0.5952355812112509,-0.05788656000123173,-0.8566103911265782,-0.20751399520062294,-0.14857506790153213,0.424481087610618,-0.4738564796605121,0.20756596496919255,0.21449028803230333,-0.7199026108803982,-0.11681691619691763,-0.22962729592604772,0.28576437928261816,0.284574204914389,-0.46543859778502694,0.03726690552854371,-0.20649410230344858,-0.9006989955134945,-0.20372485847596344,0.10585805830131538,-0.6500831571088368,-0.6184915317126338,0.08226828406689111,-0.5343512227057314,0.07040756362151161,0.14097324742675896,0.04339860375460138,0.5355990774439408],[-0.7472478926515832,0.05688969523660544,0.00938979796573641,0.32056797254312264,-0.8069507562657131,0.04280939153665157,0.32235550777525,-0.5062432981086161,-0.3720478579044914,0.46419936668306144,0.3064126638305988,-0.4397694351194934,-0.44887514298524606,0.15187939088615252,0.4568534273392995,-1.2861300534153757,0.9773325872744091,0.25244716257065264,-0.6827431258819304,-0.46248510581305863,-0.17127509564216117,0.4454852473256531,-0.9334687882302972,0.9116704560162502,-0.3468469373023036,0.7153204778870672,-0.6142162426664042,0.4122800298968643,0.5657988242534937,0.5633150155227458,-0.13053126079057495,0.7979724025687501,-0.05478153772836592,0.40447094035668535,0.16697996880027777,-0.48066848398510365,1.3182285592848366,-0.022432309660472917,0.22454532953929787,-0.050073100514995195,-0.281374645160417,-0.3637570558542556,-0.6247427956456523,0.47690940086762496,-0.5625316275524418,0.9603620738077534,-0.06958134975918168,0.1872244929620387,-0.1395636488323404,-0.5523352447898177,0.06036051164677736,-0.8989754099694727,-0.1539381687982307,-0.09717990689569203,-0.197471042950386,0.11704439758800045,-0.501708085067729,0.23634134320057842,-0.5560283694528511,-0.06226913462841718,0.45087169383155823,-0.5852498479733274,0.3769068104737036,-0.5462011501675031],[-0.6057938561359025,0.2725094812002644,0.5030823821568879,-0.7634328321230753,-0.9227579873506131,0.4266493384237248,-0.4801205528610534,0.6745719166132054,0.3820549178902183,0.9296489469411453,-0.3547284873605176,-0.5527588446086371,0.3760883617404239,-0.39389502435451984,-1.3987653266480542,-0.29398030722056345,-0.5951078908053972,-0.37846139667066253,-0.7771180005476506,0.9953551919526755,0.7313042809892413,0.0029058080023778255,0.09536080019215461,-0.9181758191026556,-0.7038607372750774,-0.25390117340442075,-0.6205042540993636,0.6633093825382939,0.8327913180295473,0.7722637286287234,0.19023155522847876,0.02677222167242655,0.963651476869165,-0.7543194154972449,0.3173736626193061,0.16823379365848204,-0.43253712472383465,-0.40822260204792854,0.43697990572774226,0.2798216203734201,0.5501509859671189,-0.5407002304425724,0.25389219740116414,-0.07326867818837904,-0.04652110369738718,-0.00124011566185636,0.5410534000072968,0.435788016493018,-0.6919721591781554,0.15591889619094365,0.5963493823974172,-0.16035119863593994,0.7665912642327827,0.5040004987495544,0.5003981288699533,0.7472195747594761,0.8610740844239694,-0.336221042167434,0.21005942603103064,0.8415489366650956,-0.884499108564621,-0.34865250851847446,-0.3581916883897817,-0.8917587464456709],[0.07155090984070017,-0.6704825147380888,-0.2621129443985596,-0.28964801162323034,0.6269025376627559,0.05454601918546962,0.021604414469482455,0.11445739966550661,-0.13484057505158523,-0.588248002559336,-0.015194017760836549,-0.10710680970386081,0.09916348527213055,0.3263723354553516,0.3915665703665946,0.42845906328708194,-0.033130553910162765,-0.2270858825983708,0.40675292237878913,-0.0008121157099586181,-0.5496928063056904,0.08590136751132783,0.14870164536321534,0.1541959148903695,0.014508645753137818,-0.4076520259190058,-0.294315545678443,-0.005771435281449412,-0.24021030386891545,-0.20100786485532643,0.3203244610164756,0.16469343353744453,-0.048426981453265856,0.2010017170826253,0.3600948967518456,0.3964453122681212,0.06183881062651061,0.23660818005581508,-0.7483728779753811,0.007453343755865938,0.04126427891944134,0.001894027573900923,0.280833153082592,-0.6056965348099506,-0.022063010684881226,0.052090137375053705,-0.2277438700561045,-0.5527025317831241,0.2839270225874276,-0.04030908489389493,-0.3263726690571171,-0.07128852031560619,0.2608206852595274,-0.06970809772743576,0.22759542090862,-0.03978490061894486,-0.2915756410126571,-0.4357673742204717,-0.11366164160753624,-0.07397539270903392,0.28679782924245534,0.19371774017550766,0.0168368785586372,-0.13064589804347718],[-0.17027790355693945,-0.14228742208188347,-0.3473060849192922,0.3229124909420671,0.13633732482033084,0.09543519881704675,0.11765145396505632,0.7009212567740789,-0.20594736259551288,-0.5322867090802709,0.04770974113760648,0.027567913522074355,-0.2094984266525167,-0.310442363332779,-0.15894545870070786,0.1729728347378216,-0.12299663952766668,0.6115143362890574,-0.07345687260135465,-0.3387849606922654,-0.5888409423782701,0.004765732192138114,-0.55588087633315,-0.13345769444843686,-0.03590236629076272,-0.30606715988117,0.5390942560897393,0.24179380545558496,0.11788890956265709,-0.3505384602878671,-0.13840794004883225,0.05358807692977348,0.12680476071540753,0.4446876859767598,-0.3133760784858871,-0.2413730317701549,-0.03404085057733094,-0.5661286344274586,0.3810564699627715,0.11624285301580316,-0.037308521753871726,0.0594750008852392,-0.27242969944395556,0.141605906235864,0.4951890895615888,0.2569303430587759,0.6864852516441229,-0.21241063510589997,-0.10422092333382854,-0.1716016480692218,-0.3841046268622461,-0.22436050938209962,0.0016691219604916994,-0.060995473002035054,0.28499732644170633,-0.021391816352998166,-0.19385852419261618,-0.2079704594351744,-0.431508740393007,-0.48607056880610194,-0.34728994387822304,0.4907496382534558,0.13492424044240303,0.4491070336485333],[-0.3698807600767173,-0.6924066270587901,-0.19642669525876827,0.19285014762981112,0.1260106232762735,0.20826964490439695,-0.013368609840828369,0.5634793242603958,-0.10035311929420157,-0.2276743556774739,-0.4797189114541519,-0.20621288154691952,-0.06376820122870015,-0.24274477633944194,0.01377130863690751,0.544929873869201,-0.44018019272031705,0.2441579219063395,-0.381349915430334,0.1748240233412,0.2574622777256902,0.013937824348566288,-0.4015139018066143,-0.05244122856241037,-0.037214854497627944,-0.1263591911585938,0.04778150296970676,-0.08357624466518966,-0.13818303476192145,-0.3561114993267058,-0.19357593212785104,0.3146480793700003,-0.19874717974315353,-0.0624337805008622,0.12264165835270495,-0.7525679214387948,0.1409034894560349,-0.08250524314507554,0.0034617675238781324,0.008294741972481881,0.36865392014784415,-0.11099541824056028,-0.1947302313090299,0.5707008874840572,-0.6124125258989926,0.0790926396322804,-0.507545251363858,-0.2871359868597326,0.573326568030841,-0.08711151170386114,0.021054329701389107,-0.6213413957975711,-0.1792289844928462,-0.006287837709383974,0.03844449344251531,0.13918527510445977,-0.1278689312505074,0.12560102204078008,-0.014446348703704204,-0.6014006291744068,-0.02283225362230736,0.35915771290743853,0.09414184720521272,0.06279893846758859],[-0.20152750558059848,-0.38516753036841345,-0.09797103757278679,0.43941537783405415,-0.4239064689818945,-0.17087273883220017,-0.1773344615562242,0.3913328709205151,-0.230143834137463,-0.21252528127173423,0.02239250851940145,0.17383286957948188,-0.22300269492305763,-0.9732878181316104,0.0847455777797841,0.18801358262868711,-0.067462154441129,-0.1354990751401496,0.17754522476987977,-0.017452560254869232,-0.17079211465187688,-0.06191941144471801,-0.3719377609578082,-0.004144627744495302,-0.4050555398022457,0.05652420168153649,-0.18914124752982883,-0.07991200862798922,-0.4903406847865833,-0.30500821311818144,-0.3979937551117583,-0.5277097345031401,-0.13604397204924829,0.061565144002924364,-0.5007830439429951,-0.4700970769192729,-0.10038199706939806,0.250309360202099,-0.09029535447681762,0.0806451737521249,-0.05021637562105201,0.06845612719220512,0.278380159545571,-0.3107297421439633,0.42280037602859294,-0.03195546485624071,-0.03739858438885441,-0.19319432135669604,-0.0621801268686189,-0.39644969665505286,-0.0039486623937851325,0.28754230582961066,-0.02995459678760663,-0.07620536931431748,-0.15974286907923466,-0.01901041294127407,-0.060844380057513386,-0.22501312088537168,-0.15544248107816244,-0.034711022100666844,-0.22743851962439987,0.20580949175171706,0.1709799648956102,0.45275457073127334],[-0.04579452022280708,0.28782014843976417,0.14962898293982577,-0.05100927751375967,-0.1582294102538393,-0.20889853860363372,0.26255127170993153,-0.03707028250452892,-0.2823459612438287,0.12933870701357988,0.2291369265874853,-0.6796629709779378,-0.13551839105764868,0.3626247643966818,0.0017057575564628138,0.2521287121082387,0.1290759023341924,-0.0719988998063866,0.06963708105730841,-0.41975277182515347,-0.4395751294628669,-0.14759062160367123,-0.11775476296551723,0.23263616048595123,0.010554687341465707,-0.31782430731181505,0.06512414158253106,0.038071457549669105,-0.6246541007620828,-0.13699013691141007,-0.34590285001366866,-0.5659915793293638,-0.7746862860046513,-0.15960998831510576,-0.14862939906846973,-0.2338607860312057,-0.24408575956673678,0.3879950803034775,0.24779756835980507,0.011414455286726466,-0.19524607581686318,0.21173791729665675,0.12968960241932112,0.42644972971415634,-0.407137417398197,-0.5410865010769389,0.5185177093744604,-0.48685452036536286,0.09390335118487028,0.43004054306140765,-0.00577263563342783,-0.08127894853854281,-0.4914807347419795,-0.5779682597858429,-0.3184087792865966,0.09462898819105704,-0.2652001358175045,-0.23610562706835742,-0.2239739109888142,-0.00013601849542498057,-0.267157459773385,-0.25977413028642143,-0.18388652358062246,0.4497699771697495],[0.24660519928921715,0.4039776772914321,0.08318222014443744,0.2369640263349341,0.7006497475974056,-0.05986240302162536,-0.36793191741825043,0.4320840600562336,-0.49126635255427226,-0.3278192991452583,0.500603681100471,0.22774836504688747,-0.25665387370544096,-0.11408594037705579,0.13810817346123336,0.21826205367960952,-0.08396338061780699,-0.06840415706892691,0.35267697992959635,-0.11727097259782403,-0.566963242797017,-0.4429015604800206,-0.1765292950060786,0.4785419136797873,0.46938343573969443,-0.129312830550497,0.1564809074456015,-0.39797317907582425,-0.3910049254687835,-0.6075061825040773,0.4127228492074706,-0.8907114082712055,0.02283774694286984,-0.25631482023149876,-0.31661251789073114,-0.33592092971513765,-0.748732989571472,-0.38559398217117713,0.279678933024081,0.02779919054386451,-0.05885349586285406,0.33764233370770397,0.10608005121644017,0.3255602735779625,-0.42943643464177994,0.010761806103689703,0.005326913034863208,-0.7877860161675699,0.3180355857018249,0.2997538474758695,-0.21079297143472364,0.21015401044323417,0.2541281543650131,-0.3838572976083822,-0.09897171009881359,-0.5912406896491282,-0.3683042294355334,-0.0037657512000187623,0.18435126538529045,-0.2549314490913571,0.10772822680435679,0.04778834762664796,-0.32604563800872394,0.2878048597808191],[0.7338052102689517,-0.1535318703666068,-0.24174524630092664,0.31873673502372607,-0.01518351739371525,-0.10857059156279522,-0.14100240214971602,-0.5216121325677807,-0.11132269686122237,-0.3422799375128657,-0.24676399276888958,0.07326475363620072,0.2835804991078381,0.1607624580065958,0.1118238165093409,-0.24144158295833942,0.32307708164581606,0.33702984954204435,0.5194653703615567,-0.15423722723142014,-0.6864189925652157,0.04348278828681517,-0.3542015910823757,0.21185255470404055,-0.052063110639791285,0.23895983658302697,-0.069340700387851,-0.6059343674269367,-0.2530582744393074,-0.5955386647928221,-0.576899478823388,-0.49153713098666524,0.15065853751219674,0.5187618101908067,-0.327390614680277,-0.30179156175139654,0.01055374015962457,0.29000139483103293,-0.0906872476059912,-0.03926173515179294,-0.6014720758816935,-0.15714703869790403,-0.13799221331421838,0.38993314757365405,0.2915448322342138,-0.07500974774743237,-0.029356397421799373,0.32043278082735516,-0.07965172687314656,0.18042599816466648,-0.4408385906767235,-0.189645248232237,-0.16388695636896305,-0.28107007138098977,-0.48245089741725117,-0.42234011924339687,-0.5363421074243067,-0.010674020753078056,-0.07776307300337515,0.37910247032047945,0.5099400757645501,-0.0045886196851627125,0.03657935231183108,0.5001195377190586],[0.005038593902123286,-0.22632308809833698,0.004500554658184587,0.3862284335748291,-0.2145282571856928,-0.12078972286926873,0.06730836249783652,0.292180419315903,0.019307435126430596,-0.13430209510606353,0.26561657658375143,0.7554580665809305,0.0071072257962789855,-0.0427205055087386,0.0803635522737154,0.023931885711302996,-0.13864588585635534,0.021170102554561265,-0.5955923699533171,-0.1988876084841181,-0.04204988557020202,-0.4691030966961609,-0.34915945017356553,-0.07660606385218639,-0.45245745456067227,-0.19855598646697808,-0.04360698629752992,-0.08926654082322577,0.22897682528667548,-0.026835022583469238,-0.3128231513669644,0.0063563494032649066,0.02003070303110081,-0.16903967612367984,-0.10207619444949233,0.03244835540920756,-0.6317908541253773,0.2563037081009477,0.25782147487995666,-0.19399923682932485,0.08170307825432852,-0.1927934558643983,0.1550429444702021,-0.12669968198212692,0.17721696331238532,-0.3251136381207403,-0.055241187190059694,-0.6178556153537426,0.4702769806352639,-0.30633118247465563,0.0030894242021728725,-0.2667597904747596,-0.16047444220754636,-0.24396884886780865,0.3015918178183811,-0.18801511023249395,-0.06873954946434398,-0.24200299313646542,-0.22036580432761374,0.005251220707943973,0.2528477908401756,0.23007287834031173,-0.6164139385425144,0.6346881732826616],[-0.7948584824581085,-0.22811942592702844,1.295974608137122,-0.18151594509837318,-0.8922012636953219,0.07267051069066931,-0.10288347390118274,-0.07967103114404628,0.2057524011801143,1.022688813045345,-0.514127517558203,-0.6169372448432914,0.15870090725809968,0.7176759079893822,-0.7272105694393809,-0.6334595782018151,0.7279116190194489,-0.8765745871158445,-0.6899590432116532,0.2303294919011059,0.13939537057445556,0.19803044347765245,0.14225944454374037,0.026221561567929798,-0.7818659693938905,0.5736026332363784,0.10844297355026421,0.1326205386612284,0.33561692496838913,1.105775563128637,0.37029065166359737,0.48392790121947155,0.48084388474507783,0.2104982787011742,0.843226498221589,-0.18492049354714882,0.3307575632176264,-0.3173422183534848,0.318875846060248,-0.2388843322453529,0.1033217824319349,0.216562474020392,-0.44327138176722064,0.2813039618083862,-0.010816789780639885,0.6751699883888643,0.5040919879241866,1.2933130762302045,-0.5101172217960857,0.3211518243334957,0.6549134530871206,0.10059063880090884,0.4073187230205458,0.3283609454523961,-0.17098130605768572,0.32443982315775244,0.647801568777755,0.3836698878280879,-0.04543900089762065,0.3854541314804721,0.20473546114046437,-0.376960925783534,0.9825593672599939,-0.783605187468239],[0.2877302336534952,-0.31470176616437423,-0.3404386117150753,0.570273091883649,0.41931455840545884,-0.16439669071864318,-0.1820719603593411,0.9753662116590786,-0.288810222260146,-0.22304256605527167,0.07450198391001107,0.7991886982846489,0.11716434088873771,0.11292998883498134,0.7350348100703751,0.535160568182255,-0.40168352569548205,0.03504208963641392,0.5435031649005377,-0.18662261395146984,0.1102521728313226,-0.4465654145463505,-0.03519973833255915,0.3888890967269479,0.05378973282941629,-0.3465459229621049,0.23560060264806704,-0.1045729223632875,0.00308733337457679,-0.6173723350400973,-0.6810809068108409,-0.3221546263594782,-0.6594454765380254,0.4227063905154365,-0.33800229664970666,0.21269344520291003,-0.7052468901586101,-0.09860953246913214,-0.892819592637971,0.11329306055874366,0.30270558849193047,0.6828340921908959,0.22153079609071497,-0.09877656148719041,0.39840995550908487,-0.18781530451059525,-0.33254344603944525,-1.0356946473897626,0.4101512602302655,-0.3540334126394472,-0.8561690264850041,0.5605705385102313,-0.038826647168059246,0.1944168753370539,-0.28412882550161633,-0.5238420282182165,-0.384607623607949,-0.8674734979241513,0.24162964871723644,-0.42522263352205775,0.06706770744099241,0.8343235122300423,-0.6174671772040561,0.1820974795142706],[0.8286522410976123,-0.6231638014154498,-0.6522982552984337,0.045691910988796366,0.8102421774445087,-0.4760080679351136,-0.26389271859924546,0.25094491389164864,-0.4846711357196783,-0.5949559140475505,0.5044977586808203,0.6225184935186193,0.1908123294920717,0.24401884670145657,0.13402837448754218,-0.0933737115679163,0.6195638914612281,0.3286883805482719,0.5822455828908436,0.3379521183097896,0.2717585919594942,-0.06068549636943439,0.13327885211583132,0.04169802219603712,0.3966930882877629,-0.5872636589097737,0.21641429144515337,-0.5798945089348154,-0.4380229690178164,-0.0993237046577901,0.4413166480241274,-0.3257334199592246,-0.744033085223445,0.6716992022111471,-0.5449497957215317,-0.34159898743384487,-0.4241267434881297,-0.34540757213288953,-0.33836097877295446,-0.10972836273934128,0.21469240727722474,0.31355657664901637,0.06852142029440265,0.1275868627024328,0.21607648386909045,0.03923928488132888,-0.6567584989342938,-0.8656188793548774,0.3218117793457794,-0.717960249606665,-0.2679159620518238,0.2511629377411214,0.1308782187148795,-0.6648122686047488,-0.5472225499722011,-0.15616124838674694,-0.5421493393292621,-0.28164010629658953,0.051908632014329305,-0.6828989768972524,-0.16532382067103807,0.22225182985409211,-0.6601443547507244,0.12337682423441228],[0.1587451255246333,0.14077823123063096,-0.1417243231265828,0.6248320106140139,-0.41232190578938255,-0.7810273709697301,1.368753159231264,-0.4172553327525128,0.2556217653308031,-0.17718551696797655,0.701394681590811,-0.1004345461094941,-1.072852776785909,0.30701253839069725,0.7775530444254319,-0.4174276882117548,0.47292590587730676,0.5953182441148402,0.17837626190497696,-0.40823598559358315,-0.15160813566353804,0.6621157412942025,-0.742731379217169,1.09497590381093,0.556282305545502,-0.20033258162613427,0.9248026058288165,-0.14322450019336397,-0.380376740491706,-0.05353961341975145,0.04029737505506555,-0.24133997486780512,-0.21628946184296635,0.9128971773705405,-0.583000703779508,-0.9091264017913573,0.2249684216626254,0.831545490743187,0.07287167797258554,-0.6998822581783856,-0.4840910166324694,-1.0368438978476906,-0.8617303251749006,0.6708749496507664,0.0025826288836156204,0.7746938888127196,-0.3106913216516281,-0.20998394153154099,0.13942580911059457,-0.5408448197691026,0.4347934863273209,-0.5916109066125806,-1.1548179555726623,-0.856072549778597,-0.14632982092326188,-0.971328632098208,-0.34873424790215096,-0.0456181457343791,-0.7452341639366129,-0.557119141852032,1.0705710192146434,-0.25002487005145513,0.3514460264852947,-0.41311184027462394],[0.06727011896253883,-0.08884334312600056,0.06711010855177689,0.018755134398032513,-0.20692101229238755,0.5813377764243907,-0.07677109797007717,0.20358514198705724,0.017422582580821577,0.7147354064364014,-0.1770517444676108,0.6836019048131914,0.6966239432081632,-0.45513630434026797,-0.1550370097273466,0.4480658375123582,-0.42482361427898824,-0.3774794469081801,0.2442120924197525,0.19775900124906962,0.7990372700242848,-0.5475693136094664,1.0643014721749304,-0.6182838981358699,-0.16835907539874598,-0.1482378539198093,-0.3037560565728084,0.8080291229527234,0.8077849429794876,0.20052150434530486,-0.44650195364260686,0.05661616609540756,-0.31852103930980685,-0.3035178616898358,0.29262465618305733,0.9134631231970991,0.02533318501546278,-0.6998979755655388,0.06547215865710705,0.886135304839386,0.5070333052614788,0.04982755766611234,0.9005269958657827,0.0026222702730257304,0.7042302109377329,-0.8137325035773358,-0.2957973061371221,0.2995605843041509,-0.4220040766609879,-0.10015807785637937,0.5194768109074976,0.552363924929955,0.2541476912294518,0.07469214963765602,0.936841357549442,0.24290380893830102,0.7077145984898466,0.08167017541732338,0.7208555968160903,0.4407415809911333,-0.5503365962770392,0.7479591056521676,-0.7502899975354854,-0.10732332357597381],[0.2438050269593497,0.0565542434776354,-0.36344536343596967,0.035680464904936426,0.18138392134719986,-0.1768458091059809,0.4851381299375805,-0.036890120710159,-0.08630945317310311,0.1773158028227464,0.15238576192250577,0.02892255561726562,-0.3907261976768084,0.1345111974734775,0.13718530103554055,0.3051229847115908,-0.06001250638318488,0.6242463329817821,-0.22268238385674669,-0.5321460776201509,0.2359395398857502,0.10743803302112216,-0.24702666472944512,-0.1966018731762884,0.7977941683871953,-0.045071249712162566,0.26142105418482897,-0.06936099485529791,-0.009006499528730023,0.05320983118021089,-0.16488851667328744,-0.18634979638769486,-0.2221699562714995,-0.37728174120268865,-0.3637676700812963,-0.052919601767218064,0.09516938133102447,0.2854479182492657,-0.22151693045214219,-0.4136276361764248,-0.7865715454931962,0.28853925411700876,-0.2261644361735072,0.09902683530632464,0.11277033231429955,-0.3628478919925559,-0.1863991310673439,0.5323948218373147,0.19797123916873155,-0.0021107421424524752,-0.5249062842950875,0.4561045335328418,-0.43345483902784904,0.5507284515948844,-0.7220670376847025,0.3530488294760056,0.2998899791473674,-0.25362798810863474,0.00176210395188176,-0.0071786576907917204,-0.20341503939988634,-0.24485362464560734,-0.5051332625384204,0.23807305619095775],[0.13424353728653696,-0.29930370031373205,0.12133475992089791,0.3693662331086582,-0.08374291417541906,-0.4421754795796886,-0.022514553944982293,0.0680260710423395,-0.08280324171271772,0.3281718966431963,0.2534937009238306,-0.08178174215682679,0.010918938281720528,-0.21717465435269606,0.38072262785846833,0.11829719645822273,0.04897320102941973,0.20875468607202297,0.37635470802677745,-0.7458046808432791,-0.3574280072411734,-0.2766652333120558,0.07408252453676346,0.06628475199861557,-0.09623442893160326,-0.6034373399022942,0.18440555060992836,-0.41687773514930127,-0.12399306881066942,-0.3893878683098404,-0.19547879898025142,-0.2944360759100582,-0.23309096151728595,0.11380447599487481,-0.5189635235798596,0.09226443006879292,-0.5920570160690487,-0.2159431391865054,-0.16602674165740913,-0.26430725788761994,0.012745459540665024,-0.12896311815697098,0.008421940145836627,0.1355559955973276,-0.13865941516765817,-0.10488201622191762,0.22764138453177282,-0.20999903657138042,0.46316769159707294,-0.05301992308252843,0.06338675165282927,-0.4677723020071053,0.024763851441728973,-0.08301396521674662,-0.29242308257692107,-0.35470034042382476,-0.7032122634681198,0.3304585045516599,-0.2313287215919143,0.1461717391403959,-0.2056047467912852,0.01958961752694482,0.014747267582720283,0.0072929140483568395]],"b1":[0.044077019869446676,-0.15527339748970234,-0.02967563633651923,0.20288091095130809,0.1407897411689654,-0.060993442270019356,-0.06982487456445725,0.11601244153861466,-0.07283949461571466,-0.09392284720374355,0.07098338965215638,0.1062125388896633,-0.1442085515608504,0.014415874091657885,-0.1590746887990551,0.19465548413290878,0.14678845949993405,0.10735044288106696,0.25431784981857514,-0.04662395509849877,-0.05815992510088138,0.004673949269223323,-0.06874172269481835,0.13835943587993838,0.10454386935183399,-0.11147334194231774,0.1198232932164991,-0.18244427907173036,-0.16748302211839763,-0.14710256264012883,-0.4284903732336257,-0.09689353649571772,-0.15667231135252657,0.1779316499141437,-0.14921871184982693,-0.12211627646487315,-0.26037469499765376,0.08447503545667133,-0.1505510896178281,-0.007937014341972871,0.07413384067976526,-0.030339660025369027,-0.014908330709696598,0.21114229614280822,0.09373097873722552,0.045979141909768026,-0.11199193148468749,-0.12312094533849317,0.073179129684604,-0.13810968116888386,-0.07696006137493212,-0.21660713619910751,-0.004548049696901669,-0.06435242162223016,-0.06940746062190233,-0.09598892749388213,-0.22220030002823377,-0.028147419180990372,-0.10727606430569932,-0.20002177205172153,0.027606357952929983,0.23553866842959967,-0.1292623309457607,0.10665875716264556],"W2p":[[0.8821246317530622,-0.336660841338807,-0.7300194418910325],[-0.4134899120759661,0.25278280279429993,0.16182760531136106],[-1.0395893506033913,0.7497817004132837,0.9227710223784763],[0.3459806528475045,0.45276962666650983,-0.12105816514868208],[1.0335710410911494,-0.8659608511165047,-0.9910618447493375],[-0.3482685305663177,-0.3578457594414919,1.165715987425364],[0.047510342918181396,0.42412751045877084,-0.6870193092468277],[0.33697479342992437,-0.6273389051120963,0.11382734783394488],[-0.33620731455291436,0.4348832585325156,0.30210991889031513],[-1.138952334041614,0.40824048687554326,1.5262070114760773],[0.506618949734513,0.13347340172498853,-1.0110621587712953],[0.41530156166684357,-0.7168195655834564,0.12148714597143685],[0.060133759621713676,-0.775347416827869,1.1484629514612998],[0.08589514681351308,0.49180957316426926,-0.12044703567526635],[0.389409513364176,0.007119120242153427,-0.7353503575916258],[0.6206836560190798,-0.6480706347776028,-0.03298968297980738],[-0.1755203789409335,0.844959339572807,-0.48911057053553825],[0.32020610565111435,-0.0031928640657995773,-1.008232005598988],[0.9114773690867003,-0.44646346169491685,-0.7740114619100217],[-0.12925493591684134,-0.1663578933097409,0.5605838557877967],[-0.3335925488905207,-0.27319150279320864,0.7103097371049278],[-0.1767015110933978,1.113324597255959,-0.12315078457007698],[-0.2694069554383392,-0.977757498587407,1.043500418251496],[0.011675468576033502,0.7109543566335701,-1.5523337702746929],[0.6799524368221279,0.04921983971553533,-1.2724576857661294],[-0.50236370467182,0.0007153158916685217,-0.03897339320729185],[0.4307870063745882,0.18419832700724567,-0.6584729052445477],[-0.3420068714078459,-0.11080311123747505,1.0602627057739105],[-0.9464253313308647,-0.08413315527930233,1.211061791841113],[-1.9138644964111737,0.3429621199158981,1.608160507475183],[-0.11251694820674753,0.16962419622246547,0.2554703783384956],[-0.713344989594331,0.23920760727911264,0.61804242722403],[-0.5384707701937721,0.1864089802305362,0.5196865370541957],[0.600447225663677,0.3792824799067544,-0.8395608318960927],[-1.1360652061444096,0.035724090470407276,1.1677884097052988],[0.015069255119829752,-0.7112070071152147,0.949060615999154],[-0.5794912118696135,0.5723948069405304,0.35425708995089317],[-0.15518703632959502,0.4108887691683658,-0.8039330510664817],[-0.8477234713246399,0.2688625412334852,0.5343564941878253],[0.028003000350549815,-0.7988185672340121,0.828714169648999],[-0.30839924678567165,-0.161403601222278,0.4890639455688148],[0.2916852399364118,-0.6506948607977047,0.3514024475520279],[0.3383273128554895,-0.8927114593168226,0.4614610518975236],[-0.07898139351324764,0.28065121612596045,-0.37476625380753187],[0.1771970568873491,-0.2230252682294053,0.01036159873047371],[-0.306070515613244,0.6299755475209554,-0.25291966518164694],[-0.15736955857359633,-0.04218625465592092,0.09512660288733589],[-1.2224644049019842,0.7898852707725639,1.0564336858120673],[0.9208201925129207,-0.037597241130337584,-0.6402793313335094],[-0.13022611067729653,-0.09185005645663434,0.10480938299770638],[-1.0000358167037453,0.46323486693008803,0.5973030277943936],[0.07122639672870132,-0.5181369195781538,0.19185558717282403],[-0.20811214985829107,-0.5681986842075347,0.854607825076141],[-0.6654230611839393,-0.3063744895837483,1.0667504687690825],[-0.24638493582828566,-0.37568095278468006,1.1104217102552911],[-0.574636886094252,-0.5374544469480753,1.1918022695028834],[-1.3145943896816359,-0.29462805730035274,2.0979820364153956],[-0.3858705105877317,0.21934569940934487,0.30261325213057694],[0.0889471191282728,-0.8367565786751842,0.7949321998756748],[-0.5067964225522111,-0.19532779764489716,1.0458537151957519],[0.01678420868436519,1.1945552507959936,-0.7829430457808453],[0.48920837174075854,-0.7596582335363372,0.09196821932367358],[-0.8040540143032398,0.9043603728212654,-0.18551019549172776],[1.0050767293943283,-0.8104556794355587,-0.754906860093785]],"b2p":[0.20443070921872422,-0.03678175566608987,-0.12353762834268646]};
+/* 训练曲线数据（由 logs/full_curve.csv 提取，train.py 训练时自动同步） */
+var TRAIN_DATA = {"iters":[1,10,20,30,40,50,60,70,80,90,100,110,120,130,140,150,160,170,180,190,200,210,220,230,240,250,260,270,280,290,300,310,320,330,340,350,360,370,380,390,400,410,420,430,440,450,460,470,480,490,500],"scores":[131.649,281.963,351.742,361.101,327.603,429.106,471.948,226.296,470.168,503.849,312.092,473.34,316.45,587.465,543.045,585.48,588.331,622.8,546.269,538.693,640.348,672.399,701.753,607.915,668.19,677.147,610.753,659.955,658.34,693.904,650.968,665.673,648.414,775.443,732.268,615.638,651.763,759.68,662.928,619.464,675.123,700.291,657.673,645.443,615.357,653.455,665.793,614.586,668.516,673.723,690.402],"foods":[4.792,9.875,12.167,12.125,11.333,14.542,16.042,7.917,15.833,17.208,10.75,16.125,10.708,19.208,18.333,19.042,19.458,20.958,18.167,17.833,20.917,22.25,23.5,20.292,22.125,22.583,20.75,21.917,22.292,23.083,21.458,22.167,21.375,25.708,24.333,20.5,21.875,24.833,22.333,20.5,22.417,23.875,22.417,21.708,20.333,21.625,22.208,20.375,22.25,22.667,23.125],"lens":[7.792,12.875,15.167,15.125,14.333,17.542,19.042,10.917,18.833,20.208,13.75,19.125,13.708,22.208,21.333,22.042,22.458,23.958,21.167,20.833,23.917,25.25,26.5,23.292,25.125,25.583,23.75,24.917,25.292,26.083,24.458,25.167,24.375,28.708,27.333,23.5,24.875,27.833,25.333,23.5,25.417,26.875,25.417,24.708,23.333,24.625,25.208,23.375,25.25,25.667,26.125],"kl":[0.00486,0.00396,0.00308,0.00672,0.01785,0.00693,0.01914,0.03831,0.02507,0.00766,0.03193,0.00412,0.00486,0.00827,0.00693,0.00552,0.02505,0.03301,0.03966,0.01961,0.00301,0.00929,0.02041,0.008,0.00286,0.00435,0.00699,0.01046,0.00483,0.00118,0.00573,0.00094,0.01217,0.00428,0.01541,0.00603,0.00328,0.00941,0.01327,0.00386,0.02127,0.00847,0.00964,0.0054,0.00406,0.01277,0.0183,0.00303,0.00358,0.00336,0.07472,0.00354,0.07637,0.00393,0.0032,0.02229,0.00918,0.00202,0.00208,0.00067,0.00808,0.00969,0.03711,0.01115,0.04483,0.0079,0.0059,0.00235,0.0544,0.12073,0.06593,0.02922,0.01215,0.0049,0.13357,0.00345,0.00684,0.00289,0.01243,0.02375,0.01136,0.00685,0.00282,0.00597,0.02061,0.00853,0.00179,0.00404,0.00239,0.00745,0.00702,0.00222,0.06007,0.00534,0.01615,0.00498,0.00991,0.20306,0.01688,0.0015,0.00334,0.1595,0.01644,0.03051,0.00811,0.0073,0.01111,0.01203,0.00218,0.04355,0.36151,0.32775,0.00428,0.01139,0.0014,0.00672,0.00294,0.00474,0.00931,0.05037,0.00495,0.05587,0.0069,0.01358,0.00221,0.04197,0.0083,0.00645,0.06777,0.00534,0.0011,0.01666,0.0293,0.05965,0.09068,0.01205,0.00559,0.01027,0.00104,0.00466,0.00221,0.03636,0.00638,0.00411,0.00113,0.00515,0.00286,0.06926,0.00398,0.00363,0.00643,0.00194,0.0016,0.0079,0.00807,0.00077,0.00653,0.00455,0.01188,0.00621,0.00081,0.00901,0.00203,0.00099,0.00401,0.00622,0.00713,0.01684,0.00289,0.00765,0.00212,0.006,0.01873,0.01468,0.00188,0.00142,0.00065,0.00739,0.00418,0.00665,0.00353,0.00354,0.0033,0.04178,0.00538,0.00383,0.00632,0.01877,0.00835,0.01436,0.00397,0.00291,0.00591,0.01133,0.00403,0.00146,0.00218,0.0146,0.00674,0.0036,0.0041,0.00623,0.00914,0.02398,0.00904,0.00816,0.00335,0.00139,0.00102,0.00547,0.01152,0.00207,0.00239,0.00062,0.0021,0.00134,0.02965,0.00922,0.00097,0.00592,0.01467,0.00634,0.01168,0.00516,0.00593,0.00218,0.00913,0.00778,0.00029,0.00057,0.00687,0.00178,0.00042,0.00978,0.00333,0.00178,0.00529,0.0017,0.00199,0.00532,0.00439,0.00141,0.00093,0.00298,0.00127,0.00723,0.00652,0.00162,0.00225,0.00055,0.04022,0.00219,0.00235,0.00431,0.00082,0.00162,0.00208,0.0101,0.00244,0.00989,0.00064,0.00578,0.00733,0.01008,0.00322,0.00071,0.00341,0.00972,0.01835,0.00229,0.00619,0.0008,0.00532,0.00335,0.00293,0.0037,0.00103,0.00135,0.00509,0.0065,0.00588,0.00212,0.0016,0.00316,0.00156,0.00181,0.00267,0.00226,0.00116,0.00035,0.00096,0.00113,0.0098,0.00191,0.00129,0.00157,0.005,0.00049,0.00052,0.0022,0.0015,0.0033,0.00482,0.00235,0.00332,0.00545,0.00151,0.00208,0.00114,0.00074,0.00194,0.00301,0.01656,0.00174,0.0034,0.00121,0.00276,0.0038,0.00097,0.00413,0.00185,0.00812,0.00056,0.0017,0.0012,0.00392,0.00119,0.00017,0.00218,0.00136,0.00133,0.00103,0.00339,0.00142,0.00465,0.0022,0.00123,0.0033,0.00362,0.0021,0.00504,0.00015,0.00052,0.00113,0.00209,0.00051,0.00115,0.00197,0.00809,0.00031,0.00252,0.00078,0.00225,0.00984,0.0034,0.00873,0.00145,0.00067,0.00076,0.00058,8e-05,0.00044,0.0009,0.00091,0.00848,0.00167,0.00615,0.00085,0.00355,0.00121,0.00304,0.00088,0.00072,0.00206,0.00317,0.00099,0.0003,0.0022,0.00152,0.00189,0.00283,0.00195,0.00077,0.00061,0.00176,0.0026,0.00104,0.00378,0.00026,0.00039,0.00195,0.00056,0.00156,0.00228,0.00098,0.00089,0.00118,0.00077,0.00358,0.00345,0.00066,0.00165,0.00056,0.00066,0.00018,0.00199,0.00331,0.0008,0.00101,0.00085,0.00102,0.00098,0.00193,0.00079,0.00416,0.00034,4e-05,0.00045,0.00021,8e-05,0.00037,0.0015,0.00033,0.00087,0.00022,0.00053,0.00282,0.00036,0.00062,0.00024,0.00371,0.00116,0.00035,0.00081,0.00065,0.00031,0.00056,0.00057,0.00136,0.00013,0.00062,0.00166,0.00043,0.00034,0.00034,0.00038,5e-05,0.00262,0.0002,0.00122,0.00075,0.0007,0.0013,0.00079,0.0001,0.0006,0.00101,0.0003,0.00018,0.00026,0.00026,0.00015,0.00012,0.00038,0.00023,0.0003,0.00016,0.00149,0.00017,0.00088,0.00048,0.00012,7e-05,0.00049,0.00059,0.00064,0.00021,0.00055,0.00035,0.00017,8e-05,0.00014,0.00137,0.0001,0.00061,0.0002,0.0001,0.00013,0.00014,5e-05,0.00054,2e-05,0.00053,0.00069,6e-05,0.00046,0.00038,0.00017,8e-05,4e-05]};
+</script>
+<script>
+function fmt(x, n = 2) { return Number(x).toFixed(n); }
+function setupCanvas(cv) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth || 760;
+  const h = cv.getAttribute('height') || 340;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const ctx = cv.getContext('2d');
+  ctx.scale(dpr, dpr);
+  return ctx;
+}
+/* 顶栏滚动高亮 */
+(function () {
+  const links = document.querySelectorAll('.topbar nav a');
+  const secs = document.querySelectorAll('main section');
+  const toc = document.querySelectorAll('aside.toc a');
+  const obs = new IntersectionObserver((entries) => {
+    entries.forEach(en => {
+      if (!en.isIntersecting) return;
+      links.forEach(l => l.classList.toggle('active', l.getAttribute('href') === '#' + en.target.id));
+      toc.forEach(l => l.classList.toggle('active', l.getAttribute('href') === '#' + en.target.id));
+    });
+  }, { rootMargin: '-15% 0px -75% 0px' });
+  secs.forEach(s => obs.observe(s));
+})();
+
+/* ============ 03 · GAE 权重图 ============ */
+(function () {
+  const cv = document.getElementById('gaeChart');
+  if (!cv) return;
+  const ctx = setupCanvas(cv);
+  const lamIn = document.getElementById('gaeLam');
+  const lamVal = document.getElementById('gaeLamVal');
+  let lam = 0.95;
+  const GAMMA = 0.99, MAXL = 24;
+  function draw() {
+    const W = cv.width / (window.devicePixelRatio || 1);
+    const H = cv.height / (window.devicePixelRatio || 1);
+    ctx.clearRect(0, 0, W, H);
+    const padL = 44, padR = 10, padT = 16, padB = 28;
+    const plotW = W - padL - padR, plotH = H - padT - padB;
+    const weights = [];
+    for (let l = 0; l <= MAXL; l++) weights.push(Math.pow(GAMMA * lam, l));
+    const bw = plotW / (MAXL + 1) * 0.72;
+    for (let l = 0; l <= MAXL; l++) {
+      const w = weights[l];
+      const x = padL + l * (plotW / (MAXL + 1)) + (plotW / (MAXL + 1)) * 0.14;
+      const hgt = Math.min(w, 1) * plotH;
+      ctx.fillStyle = w > 1e-3 ? 'rgba(37,99,235,.78)' : 'rgba(148,163,184,.25)';
+      ctx.fillRect(x, padT + plotH - hgt, bw, hgt);
+    }
+    ctx.strokeStyle = '#c7cbe0'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(padL, padT + plotH); ctx.lineTo(W - padR, padT + plotH); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(padL, padT); ctx.lineTo(padL, padT + plotH); ctx.stroke();
+    ctx.fillStyle = '#5b6472'; ctx.font = '11px sans-serif';
+    ctx.textAlign = 'right'; ctx.fillText('权重', padL - 6, padT + 10);
+    ctx.textAlign = 'center';
+    ctx.fillText('+0 步', padL, H - padB + 14);
+    ctx.fillText('+8', padL + plotW * 8 / (MAXL + 1), H - padB + 14);
+    ctx.fillText('+16', padL + plotW * 16 / (MAXL + 1), H - padB + 14);
+    ctx.fillText('+24', W - padR, H - padB + 14);
+    ctx.fillStyle = '#8a93ad'; ctx.textAlign = 'left';
+    ctx.fillText('λ = ' + fmt(lam) + ' → 有效视界约 ' + Math.round(1 / (1 - GAMMA * lam)) + ' 步', padL, padT - 5);
+  }
+  lamIn.addEventListener('input', () => { lam = parseFloat(lamIn.value); lamVal.textContent = fmt(lam); draw(); });
+  draw();
+})();
+
+/* ============ 04 · Clip 交互图 ============ */
+(function () {
+  const cv = document.getElementById('clipChart');
+  if (!cv) return;
+  const ctx = setupCanvas(cv);
+  let mode = 'pos', eps = 0.2, rho = 1.2, dragging = false;
+  const btnPos = document.getElementById('modePos');
+  const btnNeg = document.getElementById('modeNeg');
+  const epsIn = document.getElementById('clipEps');
+  const epsVal = document.getElementById('clipEpsVal');
+  const caption = document.getElementById('clipCaption');
+  const explain = document.getElementById('clipExplain');
+
+  const padL = 44, padR = 14, padT = 14, padB = 34;
+  const X0 = 0, X1 = 3, Y0 = -3.2, Y1 = 3.2;
+  const W = cv.width / (window.devicePixelRatio || 1);
+  const H = cv.height / (window.devicePixelRatio || 1);
+  function x2px(x) { return padL + (x - X0) / (X1 - X0) * (W - padL - padR); }
+  function y2py(y) { return padT + (Y1 - y) / (Y1 - Y0) * (H - padT - padB); }
+  function px2x(px) { return X0 + (px - padL) / (W - padL - padR) * (X1 - X0); }
+  function clipR(x) { return Math.min(1 + eps, Math.max(1 - eps, x)); }
+  function A() { return mode === 'pos' ? 1 : -1; }
+  function unclip(x) { return x * A(); }
+  function clipObj(x) { return clipR(x) * A(); }
+  function obj(x) { return Math.min(unclip(x), clipObj(x)); }
+  function dangerSide(x) { return mode === 'pos' ? x > 1 + eps : x < 1 - eps; }
+  function relaxSide(x) { return mode === 'pos' ? x < 1 - eps : x > 1 + eps; }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    const d0 = mode === 'pos' ? x2px(1 + eps) : x2px(X0);
+    const d1 = mode === 'pos' ? x2px(X1) : x2px(1 - eps);
+    const r0 = mode === 'pos' ? x2px(X0) : x2px(1 + eps);
+    const r1 = mode === 'pos' ? x2px(1 - eps) : x2px(X1);
+    ctx.fillStyle = 'rgba(225,29,72,.08)';
+    ctx.fillRect(d0, padT, d1 - d0, H - padT - padB);
+    ctx.fillStyle = 'rgba(5,150,105,.08)';
+    ctx.fillRect(r0, padT, r1 - r0, H - padT - padB);
+    ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillStyle = '#e11d48';
+    ctx.fillText('← 被截平 · 梯度=0', (d0 + d1) / 2, padT + 11);
+    ctx.fillStyle = '#047857';
+    ctx.fillText('← 允许回落 · 梯度照给', (r0 + r1) / 2, padT + 11);
+
+    ctx.strokeStyle = '#eef0f6'; ctx.lineWidth = 1;
+    for (let gx = 0; gx <= 3; gx += 0.5) { ctx.beginPath(); ctx.moveTo(x2px(gx), padT); ctx.lineTo(x2px(gx), H - padB); ctx.stroke(); }
+    for (let gy = -3; gy <= 3; gy += 1) { ctx.beginPath(); ctx.moveTo(padL, y2py(gy)); ctx.lineTo(W - padR, y2py(gy)); ctx.stroke(); }
+    ctx.strokeStyle = '#c7cbe0'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(padL, y2py(0)); ctx.lineTo(W - padR, y2py(0)); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x2px(0), padT); ctx.lineTo(x2px(0), H - padB); ctx.stroke();
+    ctx.fillStyle = '#8a93ad'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+    for (let gx = 0; gx <= 3; gx += 1) ctx.fillText(gx, x2px(gx), H - padB + 13);
+    ctx.textAlign = 'right';
+    for (let gy = -3; gy <= 3; gy += 1) ctx.fillText(gy, padL - 6, y2py(gy) + 4);
+    ctx.fillStyle = '#5b6472'; ctx.font = 'bold 11px sans-serif';
+    ctx.fillText('ρ', W - padR - 6, padT + 10);
+    ctx.fillText('目标值', padL + 4, padT + 10);
+
+    [1 - eps, 1, 1 + eps].forEach(v => {
+      ctx.strokeStyle = '#d8dbe8'; ctx.setLineDash([4, 4]); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x2px(v), padT); ctx.lineTo(x2px(v), H - padB); ctx.stroke();
+      ctx.setLineDash([]);
+    });
+    ctx.fillStyle = '#5b6472'; ctx.font = '11px sans-serif';
+    ctx.fillText('ρ=1-ε', x2px(1 - eps), H - padB + 26);
+    ctx.fillText('ρ=1', x2px(1), H - padB + 26);
+    ctx.fillText('ρ=1+ε', x2px(1 + eps), H - padB + 26);
+
+    const N = 300;
+    ctx.beginPath();
+    for (let i = 0; i <= N; i++) { const x = X0 + (X1 - X0) * i / N; const y = unclip(x); i === 0 ? ctx.moveTo(x2px(x), y2py(y)) : ctx.lineTo(x2px(x), y2py(y)); }
+    for (let i = N; i >= 0; i--) { const x = X0 + (X1 - X0) * i / N; const y = obj(x); ctx.lineTo(x2px(x), y2py(y)); }
+    ctx.closePath();
+    ctx.fillStyle = mode === 'pos' ? 'rgba(225,29,72,.08)' : 'rgba(5,150,105,.08)';
+    ctx.fill();
+
+    ctx.strokeStyle = '#a3aec6'; ctx.lineWidth = 1.6; ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    for (let i = 0; i <= N; i++) { const x = X0 + (X1 - X0) * i / N; const y = unclip(x); i === 0 ? ctx.moveTo(x2px(x), y2py(y)) : ctx.lineTo(x2px(x), y2py(y)); }
+    ctx.stroke(); ctx.setLineDash([]);
+
+    ctx.strokeStyle = '#d97706'; ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    for (let i = 0; i <= N; i++) { const x = X0 + (X1 - X0) * i / N; const y = clipObj(x); i === 0 ? ctx.moveTo(x2px(x), y2py(y)) : ctx.lineTo(x2px(x), y2py(y)); }
+    ctx.stroke();
+
+    ctx.strokeStyle = '#2563eb'; ctx.lineWidth = 3.2;
+    ctx.beginPath();
+    for (let i = 0; i <= N; i++) { const x = X0 + (X1 - X0) * i / N; const y = obj(x); i === 0 ? ctx.moveTo(x2px(x), y2py(y)) : ctx.lineTo(x2px(x), y2py(y)); }
+    ctx.stroke();
+
+    const px = x2px(rho), py = y2py(obj(rho));
+    ctx.strokeStyle = '#e11d48'; ctx.lineWidth = 1.4; ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.moveTo(px, padT); ctx.lineTo(px, H - padB); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = '#e11d48';
+    ctx.beginPath(); ctx.arc(px, py, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI * 2); ctx.fill();
+
+    if (dangerSide(rho)) {
+      caption.innerHTML = '当前 ρ = ' + fmt(rho, 2) + ' · 目标 = ' + fmt(obj(rho), 3) + ' · <b style="color:#e11d48">被截平：梯度归零</b>';
+    } else if (relaxSide(rho)) {
+      caption.innerHTML = '当前 ρ = ' + fmt(rho, 2) + ' · 目标 = ' + fmt(obj(rho), 3) + ' · <b style="color:#047857">允许回落：梯度照常</b>';
+    } else {
+      caption.innerHTML = '当前 ρ = ' + fmt(rho, 2) + ' · 目标 = ' + fmt(obj(rho), 3) + ' · <b style="color:#2563eb">安全区：目标随 ρ 线性变化</b>';
+    }
+    if (mode === 'pos') {
+      if (rho > 1 + eps) explain.innerHTML = '<span class="t">解读：</span>「好动作」但新策略把概率抬过了 <code>1+ε</code>。<code>min</code> 取被裁剪的 <code>(1+ε)A</code>——<b>目标被截平、梯度归零</b>，防止一次更新就把好动作概率顶爆。';
+      else if (rho < 1 - eps) explain.innerHTML = '<span class="t">解读：</span>「好动作」但 <code>ρ&lt;1-ε</code> 表示概率正在回落。<code>min</code> 取未裁剪的 <code>ρA</code>——<b>目标不截平、梯度照常</b>。因为压低好动作概率本不是危险方向，clip 只防「顶爆」不防「回落」。';
+      else explain.innerHTML = '<span class="t">解读：</span>「好动作」，<code>ρ</code> 在安全区。目标随 <code>ρ</code> 线性上升，正常获得「提高概率」的梯度。';
+    } else {
+      if (rho < 1 - eps) explain.innerHTML = '<span class="t">解读：</span>「坏动作」且新策略把概率压过了 <code>1-ε</code>。<code>min</code> 取被裁剪的 <code>(1-ε)A</code>——<b>目标被截平、梯度归零</b>，防止一次更新就把坏动作概率压死。';
+      else if (rho > 1 + eps) explain.innerHTML = '<span class="t">解读：</span>「坏动作」但 <code>ρ&gt;1+ε</code> 表示概率正在回升。<code>min</code> 取未裁剪的 <code>ρA</code>——<b>目标不截平、梯度照常</b>。因为抬高坏动作概率本不是危险方向。';
+      else explain.innerHTML = '<span class="t">解读：</span>「坏动作」，<code>ρ</code> 在安全区。目标随 <code>ρ</code> 下降，正常获得「降低概率」的梯度。';
+    }
+  }
+  btnPos.addEventListener('click', () => { mode = 'pos'; btnPos.classList.add('active'); btnNeg.classList.remove('active'); draw(); });
+  btnNeg.addEventListener('click', () => { mode = 'neg'; btnNeg.classList.add('active'); btnPos.classList.remove('active'); draw(); });
+  epsIn.addEventListener('input', () => { eps = parseFloat(epsIn.value); epsVal.textContent = fmt(eps); draw(); });
+  function pointerX(ev) {
+    const rect = cv.getBoundingClientRect();
+    return (ev.clientX - rect.left) * W / rect.width;
+  }
+  cv.addEventListener('mousedown', ev => { dragging = true; rho = Math.max(0.02, Math.min(2.98, px2x(pointerX(ev)))); draw(); });
+  window.addEventListener('mousemove', ev => { if (dragging) { rho = Math.max(0.02, Math.min(2.98, px2x(pointerX(ev)))); draw(); } });
+  window.addEventListener('mouseup', () => { dragging = false; });
+  draw();
+})();
+
+/* ============ 05 · 训练循环动画 ============ */
+(function () {
+  const grid = document.getElementById('loopGrid');
+  if (!grid) return;
+  const steps = [
+    { t: '① 预热（BC）', d: '用启发式专家数据监督训练初始策略，先教「会玩」' },
+    { t: '② 采样', d: '48 个环境并行跑 200 步，收集 状态·动作·对数概率·奖励' },
+    { t: '③ 估值', d: 'Critic 对每个状态输出 V(s)' },
+    { t: '④ GAE', d: '用 γ=0.99, λ=0.95 把奖励折算成优势 A 与回报 G' },
+    { t: '⑤ 归一化', d: '优势减均值除标准差，裁剪到 [-3, 3]' },
+    { t: '⑥ 多轮更新', d: 'PPO-Clip 目标跑 6 epoch × 512 mini-batch，clip=0.2' },
+    { t: '⑦ 衰减', d: '学习率与熵系数线性衰减（前 80% 轮）' },
+    { t: '⑧ 评估', d: '每 10 轮跑 24 局，记录得分/食物/身长' },
+  ];
+  let idx = -1, timer = null;
+  function render() {
+    grid.innerHTML = '';
+    steps.forEach((s, i) => {
+      const el = document.createElement('div');
+      el.className = 'loop-item' + (i <= idx ? ' done' : '') + (i === idx ? ' cur' : '');
+      el.innerHTML = '<div class="li-i">' + (i + 1) + '</div><div><b>' + s.t + '</b><div class="muted" style="font-size:12px">' + s.d + '</div></div>';
+      grid.appendChild(el);
+    });
+    document.getElementById('loopIndex').textContent = idx < 0 ? '步骤 0 / 8' : '步骤 ' + (idx + 1) + ' / 8';
+  }
+  window.nextLoop = function () { idx = (idx + 1) % steps.length; render(); };
+  document.getElementById('loopStep').addEventListener('click', () => {
+    clearInterval(timer); timer = null;
+    document.getElementById('loopPlay').classList.remove('active');
+    window.nextLoop();
+  });
+  document.getElementById('loopPlay').addEventListener('click', () => {
+    if (timer) { clearInterval(timer); timer = null; document.getElementById('loopPlay').classList.remove('active'); return; }
+    document.getElementById('loopPlay').classList.add('active');
+    timer = setInterval(() => { idx = (idx + 1) % steps.length; render(); }, 1500);
+  });
+  render();
+})();
+
+/* ============ 09 · 贪吃蛇游戏 + AI 实时推理 ============ */
+(function () {
+  const cv = document.getElementById('gameCanvas');
+  if (!cv) return;
+  const ctx = cv.getContext('2d');
+  const N = 12, SIZE = cv.width / N;
+  const DIR_VEC = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+  const TURN_A = { up: ['up', 'left', 'right'], down: ['down', 'right', 'left'], left: ['left', 'down', 'up'], right: ['right', 'up', 'down'] };
+  const TURN = {
+    up: { up: 'up', left: 'left', right: 'right' },
+    down: { up: 'down', left: 'right', right: 'left' },
+    left: { up: 'left', left: 'down', right: 'up' },
+    right: { up: 'right', left: 'up', right: 'down' },
+  };
+  let snake, dir, food, score, foods, status, timer, pending = null;
+  let replayTimer = null;
+
+  function newFood(snakeArr) {
+    const occ = new Set(snakeArr.map(p => p[0] + ',' + p[1]));
+    const free = [];
+    for (let x = 0; x < N; x++) for (let y = 0; y < N; y++)
+      if (!occ.has(x + ',' + y)) free.push([x, y]);
+    return free[Math.floor(Math.random() * free.length)];
+  }
+  function render(snakeArr, foodArr) {
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    ctx.fillStyle = '#0f172a'; ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 1;
+    for (let i = 1; i < N; i++) {
+      ctx.beginPath(); ctx.moveTo(i * SIZE, 0); ctx.lineTo(i * SIZE, cv.height); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, i * SIZE); ctx.lineTo(cv.width, i * SIZE); ctx.stroke();
+    }
+    ctx.fillStyle = '#f43f5e';
+    ctx.beginPath(); ctx.arc(foodArr[0] * SIZE + SIZE / 2, foodArr[1] * SIZE + SIZE / 2, SIZE * 0.32, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fda4af'; ctx.beginPath(); ctx.arc(foodArr[0] * SIZE + SIZE / 2 - 4, foodArr[1] * SIZE + SIZE / 2 - 5, 3, 0, Math.PI * 2); ctx.fill();
+    snakeArr.forEach((p, i) => {
+      const g = i === 0 ? 0.5 : 0.36 - Math.min(i * 0.01, 0.12);
+      ctx.fillStyle = i === 0 ? '#22c55e' : 'rgba(34,197,94,' + g + ')';
+      const pad = 2.5;
+      ctx.fillRect(p[0] * SIZE + pad, p[1] * SIZE + pad, SIZE - pad * 2, SIZE - pad * 2);
+    });
+    const h = snakeArr[0];
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(h[0] * SIZE + SIZE / 2 - 6, h[1] * SIZE + SIZE / 2 - 5, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(h[0] * SIZE + SIZE / 2 + 6, h[1] * SIZE + SIZE / 2 - 5, 3, 0, Math.PI * 2); ctx.fill();
+  }
+  function setUI(sc, fo, le, st) {
+    document.getElementById('gScore').textContent = sc;
+    document.getElementById('gFood').textContent = fo;
+    document.getElementById('gLen').textContent = le;
+    document.getElementById('gStatus').textContent = st;
+  }
+
+  function reset() {
+    if (replayTimer) { clearInterval(replayTimer); replayTimer = null; }
+    if (timer) { clearInterval(timer); timer = null; }
+    snake = [[4, 6], [3, 6], [2, 6]]; dir = 'right'; foods = 0; score = 0; status = '游戏中';
+    food = newFood(snake); pending = null;
+    setUI('0', '0', '3', '游戏中');
+    render(snake, food);
+    timer = setInterval(step, 160);
+  }
+  function step() {
+    if (status !== '游戏中') return;
+    let act = pending; pending = null;
+    if (act) dir = TURN[dir][act];
+    const [dx, dy] = DIR_VEC[dir];
+    const head = snake[0];
+    const nx = head[0] + dx, ny = head[1] + dy;
+    const hitWall = nx < 0 || nx >= N || ny < 0 || ny >= N;
+    const hitBody = snake.some(p => p[0] === nx && p[1] === ny);
+    if (hitWall || hitBody) {
+      status = '结束'; clearInterval(timer); timer = null;
+      setUI(score, foods, snake.length, '撞死了 · 共 ' + foods + ' 个食物');
+      render(snake, food); return;
+    }
+    snake.unshift([nx, ny]);
+    if (nx === food[0] && ny === food[1]) { foods++; score += 10; food = newFood(snake); }
+    else snake.pop();
+    setUI(score, foods, snake.length, '游戏中');
+    render(snake, food);
+  }
+
+  /* ---- AI 实时决策：与训练完全一致的 21 维状态提取 ---- */
+  function aiGetState(snakeArr, dir, food) {
+    const hx = snakeArr[0][0], hy = snakeArr[0][1];
+    const body = new Set(snakeArr.map(p => p[0] + ',' + p[1]));
+    const TURN = {
+      up: { 0: 'up', 1: 'left', 2: 'right' },
+      down: { 0: 'down', 1: 'right', 2: 'left' },
+      left: { 0: 'left', 1: 'down', 2: 'up' },
+      right: { 0: 'right', 1: 'up', 2: 'down' },
+    };
+    const DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+    const dirIdx = { up: 0, down: 1, left: 2, right: 3 };
+    const danger = d => {
+      const [dx, dy] = DIRS[d];
+      const nx = hx + dx, ny = hy + dy;
+      return (nx < 0 || nx >= N || ny < 0 || ny >= N || body.has(nx + ',' + ny)) ? 1 : 0;
+    };
+    const safetyLen = d => {
+      const [dx, dy] = DIRS[d];
+      let x = hx, y = hy, steps = 0;
+      for (;;) { x += dx; y += dy; if (x < 0 || x >= N || y < 0 || y >= N || body.has(x + ',' + y)) break; steps++; }
+      return steps / N;
+    };
+    const wallDist = d => {
+      const [dx, dy] = DIRS[d];
+      let x = hx, y = hy, dist = 0;
+      for (;;) { x += dx; y += dy; if (x < 0 || x >= N || y < 0 || y >= N) break; dist++; }
+      return dist / N;
+    };
+    const fwd = dir, left = TURN[dir][1], right = TURN[dir][2];
+    const isAhead = d => {
+      const [dx, dy] = DIRS[d];
+      let nx = hx, ny = hy;
+      for (;;) {
+        nx += dx; ny += dy;
+        if (nx < 0 || nx >= N || ny < 0 || ny >= N) return false;
+        if (nx === food[0] && ny === food[1]) return true;
+        if (body.has(nx + ',' + ny)) return false;
+      }
+    };
+    const foodRel = [isAhead(fwd) ? 1 : 0, isAhead(left) ? 1 : 0, isAhead(right) ? 1 : 0];
+    foodRel.push(foodRel[0] || foodRel[1] || foodRel[2] ? 0 : 1);
+    const dirOnehot = [0, 0, 0, 0]; dirOnehot[dirIdx[dir]] = 1;
+    const foodDist = (Math.abs(hx - food[0]) + Math.abs(hy - food[1])) / (N + N);
+    const freeRatio = (N * N - snakeArr.length) / (N * N);
+    let trapped = 0;
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+      if (dx === 0 && dy === 0) continue;
+      const x = hx + dx, y = hy + dy;
+      if (x < 0 || x >= N || y < 0 || y >= N || body.has(x + ',' + y)) trapped++;
+    }
+    return [
+      danger(fwd), danger(left), danger(right), ...foodRel, ...dirOnehot,
+      wallDist(fwd), wallDist(left), wallDist(right), foodDist,
+      snakeArr.length / (N * N),
+      safetyLen(fwd), safetyLen(left), safetyLen(right), freeRatio, trapped / 8,
+    ];
+  }
+  function aiForward(state, M) {
+    const W1flat = M.W1.length > 0 && !Array.isArray(M.W1[0]);
+    const W2flat = M.W2p.length > 0 && !Array.isArray(M.W2p[0]);
+    const w1 = (i, j) => W1flat ? M.W1[i * M.h + j] : M.W1[i][j];
+    const w2 = (j, a) => W2flat ? M.W2p[j * M.na + a] : M.W2p[j][a];
+    const h = new Array(M.h).fill(0);
+    for (let j = 0; j < M.h; j++) {
+      let acc = M.b1[j];
+      for (let i = 0; i < 21; i++) acc += state[i] * w1(i, j);
+      h[j] = Math.tanh(acc);
+    }
+    const logits = new Array(M.na).fill(0);
+    for (let a = 0; a < M.na; a++) {
+      let acc = M.b2p[a];
+      for (let j = 0; j < M.h; j++) acc += h[j] * w2(j, a);
+      logits[a] = acc;
+    }
+    return logits;
+  }
+  function aiAct(snakeArr, dir, food, M) {
+    const state = aiGetState(snakeArr, dir, food);
+    const logits = aiForward(state, M);
+    const mx = Math.max(...logits);
+    const e = logits.map(v => Math.exp(v - mx));
+    const s = e.reduce((a, b) => a + b, 0);
+    const probs = e.map(v => v / s);
+    const r = Math.random();
+    let acc = 0;
+    for (let a = 0; a < probs.length; a++) { acc += probs[a]; if (r < acc) return a; }
+    return probs.length - 1;
+  }
+
+  function playAI() {
+    if (timer) { clearInterval(timer); timer = null; }
+    if (replayTimer) { clearInterval(replayTimer); replayTimer = null; }
+    const M = (typeof AI_MODEL === 'undefined' || !AI_MODEL) ? null : AI_MODEL;
+    if (!M) { setUI('0', '0', '3', '未找到 AI 模型数据'); return; }
+    status = 'AI 自动玩';
+    let snakeArr = [[4, 6], [3, 6], [2, 6]];
+    let dir = 'right';
+    let foods = 0;
+    let food = newFood(snakeArr);
+    setUI('0', '0', '3', 'AI 实时推理中…');
+    render(snakeArr, food);
+    replayTimer = setInterval(() => {
+      const a = aiAct(snakeArr, dir, food, M);
+      dir = TURN_A[dir][a];
+      const [dx, dy] = DIR_VEC[dir];
+      const h = snakeArr[0];
+      const nx = h[0] + dx, ny = h[1] + dy;
+      const hitWall = nx < 0 || nx >= N || ny < 0 || ny >= N;
+      const hitBody = snakeArr.some(p => p[0] === nx && p[1] === ny);
+      if (hitWall || hitBody) {
+        clearInterval(replayTimer); replayTimer = null;
+        setUI(foods * 10, foods, snakeArr.length, 'AI 撞死 · 共 ' + foods + ' 个食物');
+        render(snakeArr, food); return;
+      }
+      snakeArr.unshift([nx, ny]);
+      if (nx === food[0] && ny === food[1]) { foods++; food = newFood(snakeArr); }
+      else snakeArr.pop();
+      setUI(foods * 10, foods, snakeArr.length, 'AI 实时推理中…');
+      render(snakeArr, food);
+    }, 55);
+  }
+
+  document.getElementById('gameAI').addEventListener('click', () => { playAI(); });
+  document.getElementById('gameRestart').addEventListener('click', () => { reset(); });
+  const KEY_TO_DIR = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
+  window.addEventListener('keydown', ev => {
+    const kd = KEY_TO_DIR[ev.key];
+    if (!kd || status !== '游戏中') return;
+    ev.preventDefault();
+    const rel = Object.keys(TURN[dir]).find(k => TURN[dir][k] === kd);
+    pending = rel;
+  });
+  reset();
+})();
+
+/* ============ 09 · 训练曲线（真实数据，来自 logs/full_curve.csv） ============ */
+(function () {
+  const cv = document.getElementById('trainChart');
+  if (!cv) return;
+  const ctx = setupCanvas(cv);
+  const W = cv.width / (window.devicePixelRatio || 1);
+  const H = cv.height / (window.devicePixelRatio || 1);
+  const D = (typeof TRAIN_DATA === 'undefined' || !TRAIN_DATA) ? null : TRAIN_DATA;
+  const padL = 52, padR = 16, padT = 20, padB = 36;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    if (!D) {
+      ctx.fillStyle = '#5b6472'; ctx.font = '13px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('训练数据待嵌入（运行 train.py 后自动同步）', W / 2, H / 2);
+      return;
+    }
+    const iters = D.iters, scores = D.scores;
+    const yMin = Math.min(0, ...scores), yMax = Math.max(1, ...scores);
+    const yPad = (yMax - yMin) * 0.08;
+    const y0 = yMin - yPad, y1 = yMax + yPad;
+    const k0 = 0, k1 = 0.4;
+    const x2 = x => padL + x / 500 * plotW;
+    const y2 = y => padT + (y1 - y) / (y1 - y0) * plotH;
+    const ky2 = y => padT + (k1 - y) / (k1 - k0) * plotH;
+
+    ctx.strokeStyle = '#eef0f6'; ctx.lineWidth = 1;
+    for (let i = 0; i <= 5; i++) {
+      const gy = y0 + (y1 - y0) * i / 5;
+      ctx.beginPath(); ctx.moveTo(padL, y2(gy)); ctx.lineTo(W - padR, y2(gy)); ctx.stroke();
+      ctx.fillStyle = '#8a93ad'; ctx.font = '11px sans-serif'; ctx.textAlign = 'right';
+      ctx.fillText(Math.round(gy), padL - 6, y2(gy) + 4);
+    }
+    for (let i = 0; i <= 4; i++) {
+      const gx = i * 100;
+      ctx.beginPath(); ctx.moveTo(x2(gx), padT); ctx.lineTo(x2(gx), padT + plotH); ctx.stroke();
+      ctx.fillStyle = '#8a93ad'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(gx, x2(gx), H - padB + 16);
+    }
+    ctx.fillStyle = '#5b6472'; ctx.font = 'bold 11px sans-serif';
+    ctx.fillText('训练轮数', W - padR, H - padB + 16);
+    ctx.save(); ctx.translate(12, padT + 4); ctx.rotate(-Math.PI / 2);
+    ctx.fillText('评估得分', 0, 0); ctx.restore();
+
+    ctx.strokeStyle = '#059669'; ctx.lineWidth = 1.4; ctx.setLineDash([5, 4]);
+    ctx.beginPath(); ctx.moveTo(padL, y2(590)); ctx.lineTo(W - padR, y2(590)); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = '#047857'; ctx.font = '11px sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText('启发式 ≈ +590', W - padR - 140, y2(590) - 6);
+
+    ctx.beginPath();
+    ctx.moveTo(x2(iters[0]), y2(0));
+    iters.forEach((it, i) => ctx.lineTo(x2(it), y2(scores[i])));
+    ctx.lineTo(x2(iters[iters.length - 1]), y2(0));
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(37,99,235,.12)'; ctx.fill();
+
+    ctx.strokeStyle = '#2563eb'; ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    iters.forEach((it, i) => { const px = x2(it), py = y2(scores[i]); i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py); });
+    ctx.stroke();
+
+    if (D.kl && D.kl.length > 1) {
+      ctx.strokeStyle = '#d97706'; ctx.lineWidth = 1.1; ctx.setLineDash([3, 3]);
+      ctx.beginPath();
+      D.kl.forEach((k, i) => { const px = x2(i + 1), py = ky2(k); i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py); });
+      ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = '#8a93ad'; ctx.font = '10px sans-serif'; ctx.textAlign = 'left';
+      [0.1, 0.2, 0.3, 0.4].forEach(v => ctx.fillText(v.toFixed(1), W - padR + 4, ky2(v) + 3));
+      ctx.save(); ctx.translate(W - padR - 4, padT - 4); ctx.textAlign = 'right';
+      ctx.fillText('KL(每轮)', 0, 0); ctx.restore();
+    }
+  }
+  draw();
+})();
+</script>
+</body>
+</html>

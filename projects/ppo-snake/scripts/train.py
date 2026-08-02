@@ -4,12 +4,12 @@
 运行：
     python train.py                    # 默认参数训练
     python train.py --iters 300 --eval-every 10
-    python train.py --seed 42 --save-model best.npz
+    python train.py --seed 42 --save-model best.json
 
 输出：
     * 每 eval-every 轮打印评估分数
     * 训练日志写入 logs/train_log.csv（供 HTML 页面绘制学习曲线）
-    * 模型保存到 checkpoint/ppo_snake.npz（-1 轮）与 best.npz（最优）
+    * 模型保存到 checkpoint/ppo_snake.json（-1 轮）与 best.json（最优）
 
 稳定训练三件套（推荐，能显著消除种子敏感性）：
     python train.py --pretrain --separate-critic --lr 3e-4 --iters 500
@@ -23,8 +23,15 @@ import csv
 
 import numpy as np
 
-from snake_env import SnakeEnv, STATE_DIM
-from ppo import MLPPolicy, AdamOptimizer, ppo_update, compute_gae
+# 保证从项目任意位置运行都能导入 src 包
+import os
+import sys
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
+from src.snake_env import SnakeEnv, STATE_DIM
+from src.ppo import MLPPolicy, AdamOptimizer, ppo_update, compute_gae
 
 # Windows 控制台可能默认 GBK，统一切到 UTF-8 避免中文打印崩溃
 try:
@@ -131,13 +138,13 @@ def main():
                              "大幅消除种子敏感性")
     parser.add_argument("--pretrain-iters", type=int, default=40, help="预训练轮数")
     parser.add_argument("--save-model", type=str, default=None,
-                        help="模型保存路径（默认 checkpoint/ppo_snake.npz）")
+                        help="模型保存路径（默认 checkpoint/ppo_snake.json）")
     args = parser.parse_args()
 
     os.makedirs("checkpoint", exist_ok=True)
     os.makedirs("logs", exist_ok=True)
-    model_path = args.save_model or "checkpoint/ppo_snake.npz"
-    best_path = "checkpoint/best_snake.npz"
+    model_path = args.save_model or "checkpoint/ppo_snake.json"
+    best_path = "checkpoint/best_snake.json"
 
     print("=" * 64)
     print("PPO 训练贪吃蛇")
@@ -154,7 +161,7 @@ def main():
     for si in range(args.seeds):
         seed = args.seed + si
         csv_path = f"logs/train_log_s{seed}.csv"
-        seed_best_path = f"checkpoint/best_snake_s{seed}.npz"
+        seed_best_path = f"checkpoint/best_snake_s{seed}.json"
         t_start = time.time()
 
         np.random.seed(seed)
@@ -166,7 +173,7 @@ def main():
 
         # 行为克隆预热：用启发式专家数据监督训练，消除种子敏感性
         if args.pretrain:
-            from pretrain import collect_data, bc_update_wrapper
+            from src.pretrain import collect_data, bc_update_wrapper
             print(f"[seed={seed}] 行为克隆预热 {args.pretrain_iters} 轮...")
             for _ in range(args.pretrain_iters):
                 states, actions, returns = collect_data(400, 0.1, seed)

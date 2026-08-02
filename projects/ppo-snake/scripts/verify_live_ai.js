@@ -3,11 +3,12 @@
 const fs = require('fs');
 const vm = require('vm');
 
-const html = fs.readFileSync('PPO贪吃蛇讲解.html', 'utf-8');
+const html = fs.readFileSync(require('path').join(__dirname, '..', 'PPO贪吃蛇讲解.html'), 'utf-8');
 
-// 提取 AI_MODEL 定义
-const modelMatch = html.match(/var AI_MODEL = \{[\s\S]*?\n\};/);
+// 提取 AI_MODEL 定义（内嵌为 JSON 对象，可能包含嵌套数组）
+const modelMatch = html.match(/var AI_MODEL = (\{[\s\S]*?\});/);
 if (!modelMatch) { console.error('找不到 AI_MODEL'); process.exit(1); }
+const aiModelJson = modelMatch[1];
 
 // 提取 aiGetState / aiForward / aiAct 函数定义
 function extractFn(name) {
@@ -25,10 +26,10 @@ const DIRS_SRC = 'const DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right
 const sandbox = { Math, console, Set, Array, Number, parseInt, isNaN };
 sandbox.AI_MODEL = undefined;
 vm.createContext(sandbox);
-vm.runInContext(modelMatch[0] + '\n' + DIRS_SRC + '\n' + fnSrc, sandbox);
+vm.runInContext('var AI_MODEL = ' + aiModelJson + ';\n' + DIRS_SRC + '\n' + fnSrc, sandbox);
 
 const M = sandbox.AI_MODEL;
-console.log('模型维度: h=' + M.h, 'na=' + M.na, 'W1长度=' + M.W1.length);
+console.log('模型维度: h=' + M.h, 'na=' + M.na, 'W1 行数=' + M.W1.length, '列数=' + M.W1[0].length);
 
 // 蛇游戏模拟（与 HTML step 一致）
 const N = 12;

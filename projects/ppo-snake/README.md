@@ -9,33 +9,38 @@
 pip install -r requirements.txt
 
 # 1. 训练（稳定三件套：BC预热 + 独立Critic + 小学习率；约 10~15 分钟）
-python train.py --pretrain --separate-critic --iters 500 --seeds 2
+python scripts/train.py --pretrain --separate-critic --iters 500 --seeds 2
 
 # 2. 看 AI 在终端里表演（ASCII 动画）
-python play.py --separate-critic --episodes 20
+python scripts/play.py --separate-critic --episodes 20
 
 # 3. 环境自测（随机策略的对照基线）
-python snake_env.py
+python src/snake_env.py
 ```
 
-> 旧版入口说明：`train.py` 默认仍保持兼容旧行为（无预热、共享 Critic）。
 > 推荐使用上面的「稳定三件套」参数，成功率从 ~12% 提升到 100%（详见「设计要点」）。
 
 ## 项目结构
 
-| 文件 | 职责 |
-|---|---|
-| `snake_env.py` | 贪吃蛇环境：12×12 网格、21 维状态特征、奖励设计（稀疏 + 双 shaping）、渲染 |
-| `ppo.py` | PPO 核心：两层 MLP 策略网络、手写反向传播、Adam、PPO-Clip 目标、GAE、行为克隆更新 |
-| `pretrain.py` | 行为克隆预热：用启发式专家打局收集数据，监督训练策略与价值头 |
-| `train.py` | 训练入口：48 环境并行采样、优势归一化、学习率/熵衰减、支持 `--pretrain --separate-critic` |
-| `play.py` | 加载模型，终端动画演示自动玩 |
-| `record_replay.py` | 录制完整回放数据，输出 `ai_replay.js`（HTML 实时决策的后备数据） |
-| `export_model.py` | 把 `checkpoint/best_snake.npz` 策略权重导出为 `ai_model.js`（供浏览器实时推理） |
-| `embed_model_to_html.py` | 把 `ai_model.js` 权重嵌入 `PPO贪吃蛇讲解.html`（需 `--html` 指定路径） |
-| `verify_live_ai.js` | 端到端验证：模拟 HTML 中实时 AI 决策，跑多局统计身长/食物 |
-| `checkpoint/` | 最优模型 `best_snake.npz`（训练 500 轮，BC 预热 + 独立 Critic） |
-| `logs/` | 训练曲线原始数据 `full_curve.csv`（HTML 第 07 节的绘图数据源） |
+```
+ppo-snake/
+├── PPO贪吃蛇讲解.html      # 讲解页面（内嵌策略权重，浏览器直接打开）
+├── src/                    # 核心代码库
+│   ├── snake_env.py        #   环境：12×12 网格、21 维状态、奖励设计（稀疏 + 双 shaping）
+│   ├── ppo.py              #   PPO：MLP 网络、手写反向传播、Adam、Clip 目标、GAE
+│   └── pretrain.py         #   行为克隆预热：启发式专家数据监督训练初始策略
+├── scripts/                # 入口脚本
+│   ├── train.py            #   训练入口（48 环境并行采样、优势归一化、学习率/熵衰减）
+│   ├── play.py             #   加载模型，终端动画演示自动玩
+│   ├── embed_model_to_html.py  #   把 checkpoint/best_snake.json 权重嵌入讲解页
+│   └── verify_live_ai.js   #   端到端验证：模拟页面实时 AI 决策，统计身长/食物
+├── checkpoint/             # 最优模型 best_snake.json（通用 JSON 格式）
+├── logs/                   # 训练曲线原始数据 full_curve.csv（HTML 绘图数据源）
+├── requirements.txt
+└── README.md
+```
+
+**模型格式**：权重以**通用 JSON** 保存（`checkpoint/best_snake.json`，含维度信息），Python 与 JavaScript 都能直接读取，无需任何格式转换脚本。
 
 ## 设计要点
 
@@ -59,3 +64,13 @@ python snake_env.py
 > 重要：强化学习对随机种子极度敏感（旧版成功率仅约 12%，90% 的种子会在训练早期塌缩）。
 > 新版用「行为克隆预热」从源头消除种子敏感性，4/4 种子全部稳定收敛到身长 23~25，
 > 最优模型续训到 820 轮时平均身长 32、单局最高 41。
+
+## 重新嵌入权重到讲解页
+
+训练出新模型后，重新内嵌权重：
+
+```bash
+python scripts/embed_model_to_html.py
+```
+
+页面里的「AI 自动玩」就是靠这份内嵌权重在浏览器里实时推理的。

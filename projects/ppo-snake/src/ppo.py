@@ -96,23 +96,59 @@ class MLPPolicy:
         return [self.W1, self.b1, self.W2p, self.b2p, self.W2v, self.b2v]
 
     def save(self, path):
-        d = dict(W1=self.W1, b1=self.b1, W2p=self.W2p, b2p=self.b2p,
-                 W2v=self.W2v, b2v=self.b2v)
+        """保存为通用 JSON 格式（Python 与 JS 都能直接读，无需中间转换）。"""
+        import json
+
+        d = dict(
+            format="ppo-snake-weights",
+            version=2,
+            state_dim=self.sd,
+            hidden=self.h,
+            n_actions=self.na,
+            separate_critic=self.separate_critic,
+            W1=self.W1.tolist(), b1=self.b1.tolist(),
+            W2p=self.W2p.tolist(), b2p=self.b2p.tolist(),
+            W2v=self.W2v.tolist(), b2v=self.b2v.tolist(),
+        )
         if self.separate_critic:
-            d.update(W1v=self.W1v, b1v=self.b1v)
-        np.savez_compressed(path, **d)
+            d["W1v"] = self.W1v.tolist()
+            d["b1v"] = self.b1v.tolist()
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False)
 
     def load(self, path):
-        d = np.load(path)
-        self.W1, self.b1 = d["W1"], d["b1"]
-        self.W2p, self.b2p = d["W2p"], d["b2p"]
-        self.W2v, self.b2v = d["W2v"], d["b2v"]
+        """从 JSON（或兼容的 npz）加载权重。"""
+        import json
+
+        if path.endswith(".npz"):
+            # 兼容旧版 npz 权重
+            d = np.load(path)
+            self.W1, self.b1 = d["W1"], d["b1"]
+            self.W2p, self.b2p = d["W2p"], d["b2p"]
+            self.W2v, self.b2v = d["W2v"], d["b2v"]
+            if self.separate_critic:
+                if "W1v" in d:
+                    self.W1v, self.b1v = d["W1v"], d["b1v"]
+                else:
+                    self.W1v = self.W1.copy()
+                    self.b1v = self.b1.copy()
+            return
+
+        with open(path, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        self.sd = d.get("state_dim", self.sd)
+        self.h = d.get("hidden", self.h)
+        self.na = d.get("n_actions", self.na)
+        self.separate_critic = d.get("separate_critic", self.separate_critic)
+        self.W1 = np.array(d["W1"], dtype=np.float32)
+        self.b1 = np.array(d["b1"], dtype=np.float32)
+        self.W2p = np.array(d["W2p"], dtype=np.float32)
+        self.b2p = np.array(d["b2p"], dtype=np.float32)
+        self.W2v = np.array(d["W2v"], dtype=np.float32)
+        self.b2v = np.array(d["b2v"], dtype=np.float32)
         if self.separate_critic:
-            if "W1v" in d:
-                self.W1v, self.b1v = d["W1v"], d["b1v"]
-            else:
-                self.W1v = self.W1.copy()
-                self.b1v = self.b1.copy()
+            self.W1v = np.array(d.get("W1v", d["W1"]), dtype=np.float32)
+            self.b1v = np.array(d.get("b1v", d["b1"]), dtype=np.float32)
 
 
 class AdamOptimizer:

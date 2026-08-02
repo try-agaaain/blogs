@@ -4,7 +4,7 @@
 运行：
     python play.py                  # 终端动画演示一局
     python play.py --episodes 20    # 跑 20 局统计平均表现
-    python play.py --model checkpoint/best_snake.npz --interval 0.1
+    python play.py --model checkpoint/best_snake.json --interval 0.1
 """
 
 import argparse
@@ -14,8 +14,15 @@ import time
 
 import numpy as np
 
-from snake_env import SnakeEnv, STATE_DIM
-from ppo import MLPPolicy
+# 保证从项目任意位置运行都能导入 src 包
+import os
+import sys
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
+from src.snake_env import SnakeEnv, STATE_DIM
+from src.ppo import MLPPolicy
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -48,7 +55,7 @@ def play_one(net, interval=0.08, render=True, max_steps=3000):
 
 def main():
     parser = argparse.ArgumentParser(description="加载 PPO 模型自动玩贪吃蛇")
-    parser.add_argument("--model", type=str, default="checkpoint/best_snake.npz")
+    parser.add_argument("--model", type=str, default="checkpoint/best_snake.json")
     parser.add_argument("--episodes", type=int, default=1, help="演示局数")
     parser.add_argument("--interval", type=float, default=0.08, help="动画刷新间隔(秒)")
     parser.add_argument("--hidden", type=int, default=64, help="隐藏层宽度（须与训练一致）")

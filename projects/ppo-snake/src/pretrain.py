@@ -9,7 +9,7 @@
   不再依赖随机初始化撞大运。
 
 用法：
-    python pretrain.py --iters 40 --save checkpoint/pretrained.npz
+    python pretrain.py --iters 40 --save checkpoint/pretrained.json
     python pretrain.py --eps-bc 0.1    # 数据收集时 10% 概率随机动作（增加多样性）
 """
 import argparse
@@ -18,8 +18,8 @@ import time
 
 import numpy as np
 
-from snake_env import SnakeEnv, STATE_DIM, TURN, DIR_VEC
-from ppo import MLPPolicy, AdamOptimizer, bc_update
+from src.snake_env import SnakeEnv, STATE_DIM, TURN, DIR_VEC
+from src.ppo import MLPPolicy, AdamOptimizer, bc_update
 
 
 def safety_steps(env, d):
@@ -107,7 +107,7 @@ def evaluate(net, n_episodes=24):
 
 def bc_update_wrapper(net, opt, states, actions, returns, label_smooth=0.1):
     """给 train.py 用的 BC 更新包装：价值头随策略一起训练（独立 Critic 时互不干扰）。"""
-    from ppo import bc_update
+    from src.ppo import bc_update
     return bc_update(net, opt, states, actions, returns=returns,
                      label_smooth=label_smooth, val_coef=0.3)
 
@@ -120,7 +120,7 @@ def main():
     parser.add_argument("--lr", type=float, default=1e-2, help="预训练学习率")
     parser.add_argument("--hidden", type=int, default=64)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--save", type=str, default="checkpoint/pretrained.npz")
+    parser.add_argument("--save", type=str, default="checkpoint/pretrained.json")
     args = parser.parse_args()
 
     np.random.seed(args.seed)

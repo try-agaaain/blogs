@@ -15,7 +15,7 @@ python scripts/train.py --pretrain --separate-critic --iters 500 --seeds 2
 python scripts/play.py --separate-critic --episodes 20
 
 # 3. 环境自测（随机策略的对照基线）
-python src/snake_env.py
+python src/snake_game.py
 ```
 
 > 推荐使用上面的「稳定三件套」参数，成功率从 ~12% 提升到 100%（详见「设计要点」）。
@@ -26,7 +26,7 @@ python src/snake_env.py
 ppo-snake/
 ├── PPO贪吃蛇讲解.html      # 讲解页面（内嵌策略权重，浏览器直接打开）
 ├── src/                    # 核心代码库
-│   ├── snake_env.py        #   环境：12×12 网格、21 维状态、奖励设计（稀疏 + 双 shaping）
+│   ├── snake_game.py      #   环境：12×12 网格、21 维状态、奖励设计（稀疏 + 双 shaping）
 │   ├── ppo.py              #   PPO：MLP 网络、手写反向传播、Adam、Clip 目标、GAE
 │   └── pretrain.py         #   行为克隆预热：启发式专家数据监督训练初始策略
 ├── scripts/                # 入口脚本

@@ -21,7 +21,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from src.snake_env import SnakeEnv, STATE_DIM
+from src.snake_game import SnakeEnv, STATE_DIM
 from src.ppo import MLPPolicy
 
 try:

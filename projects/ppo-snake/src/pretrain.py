@@ -18,7 +18,7 @@ import time
 
 import numpy as np
 
-from src.snake_env import SnakeEnv, STATE_DIM, TURN, DIR_VEC
+from src.snake_game import SnakeEnv, STATE_DIM, TURN, DIR_VEC
 from src.ppo import MLPPolicy, AdamOptimizer, bc_update
 
 

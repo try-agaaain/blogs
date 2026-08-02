@@ -16,10 +16,12 @@
 """
 
 import argparse
+import csv
+import json
 import os
+import re
 import sys
 import time
-import csv
 
 import numpy as np
 
@@ -30,7 +32,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from src.snake_env import SnakeEnv, STATE_DIM
+from src.snake_game import SnakeEnv, STATE_DIM
 from src.ppo import MLPPolicy, AdamOptimizer, ppo_update, compute_gae
 
 # Windows 控制台可能默认 GBK，统一切到 UTF-8 避免中文打印崩溃
@@ -114,6 +116,50 @@ def evaluate(net, n_episodes=24, seed=None):
     return total_r / n, total_food / n, total_len / n
 
 
+# ------------------------------------------------------------ 同步讲解页
+def embed_weights_to_html(model_json, html_path):
+    """把 best_snake.json 的策略权重内嵌进讲解页（var AI_MODEL 块）。
+
+    讲解页在 file:// 协议下用浏览器直接打开，无法 fetch 本地 JSON，
+    所以训练结束后把最新权重"烧录"进 HTML，供「AI 自动玩」实时推理。
+    """
+    with open(model_json, encoding="utf-8") as f:
+        d = json.load(f)
+
+    # 只提取策略网络部分（价值头仅训练用，浏览器推理用不到）
+    ai_model = {
+        "h": d["hidden"],
+        "na": d["n_actions"],
+        "W1": d["W1"],
+        "b1": d["b1"],
+        "W2p": d["W2p"],
+        "b2p": d["b2p"],
+    }
+    script = (
+        "<script>/* 浏览器内实时运行的策略网络权重（由 scripts/train.py 训练结束后"
+        "自动从 checkpoint/best_snake.json 内嵌，供「AI 自动玩」现场决策使用） */\n"
+        "var AI_MODEL = " + json.dumps(ai_model, separators=(",", ":")) + ";\n"
+        "</script>"
+    )
+
+    with open(html_path, encoding="utf-8") as f:
+        html = f.read()
+
+    # 替换已有的 AI_MODEL 块；没有则插到第一个内联 <script> 之前
+    pattern = re.compile(
+        r"<script>/\* 浏览器内实时运行的策略网络权重[\s\S]*?</script>", re.MULTILINE)
+    if pattern.search(html):
+        html = pattern.sub(lambda m: script, html, count=1)
+    else:
+        anchor = "<script>\n"
+        assert anchor in html, f"{html_path} 里找不到 <script> 锚点"
+        html = html.replace(anchor, script + "\n" + anchor, 1)
+
+    with open(html_path, "w", encoding="utf-8") as f:
+        f.write(html)
+    print(f"已把 AI_MODEL（{len(script)//1024} KB）同步进 {os.path.basename(html_path)}")
+
+
 # ------------------------------------------------------------ 主流程
 def main():
     parser = argparse.ArgumentParser(description="PPO 训练贪吃蛇")
@@ -139,7 +185,20 @@ def main():
     parser.add_argument("--pretrain-iters", type=int, default=40, help="预训练轮数")
     parser.add_argument("--save-model", type=str, default=None,
                         help="模型保存路径（默认 checkpoint/ppo_snake.json）")
+    parser.add_argument("--no-embed", action="store_true",
+                        help="训练结束后不把权重同步进 PPO贪吃蛇讲解.html")
+    parser.add_argument("--embed-only", action="store_true",
+                        help="只把 checkpoint/best_snake.json 同步进讲解页，不训练")
     args = parser.parse_args()
+
+    html_path = os.path.join(_ROOT, "PPO贪吃蛇讲解.html")
+
+    # 仅同步模式：把现有模型权重烧录进讲解页后直接退出
+    if args.embed_only:
+        if not os.path.exists(best_model := "checkpoint/best_snake.json"):
+            raise SystemExit(f"找不到 checkpoint/best_snake.json，请先训练")
+        embed_weights_to_html(best_model, html_path)
+        return
 
     os.makedirs("checkpoint", exist_ok=True)
     os.makedirs("logs", exist_ok=True)
@@ -243,6 +302,14 @@ def main():
     print(f"最优种子 seed={global_best_seed}，最优平均得分 = {global_best:+.2f}")
     print(f"最佳模型已保存: {best_path}")
     print(f"训练日志:   logs/train_log_s*.csv（每个种子一份）")
+
+    # 把最新权重同步进讲解页（除非 --no-embed）
+    if args.no_embed:
+        print("已跳过讲解页同步（--no-embed）。")
+        print(f"如需手动同步，可运行:\n"
+              f"    python scripts/train.py --embed-only   # 只同步讲解页，不训练")
+    elif os.path.exists(best_path):
+        embed_weights_to_html(best_path, html_path)
 
 
 if __name__ == "__main__":

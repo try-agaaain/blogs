@@ -191,13 +191,17 @@ def main():
                         help="只把 checkpoint/best_snake.json 同步进讲解页，不训练")
     args = parser.parse_args()
 
-    html_path = os.path.join(_ROOT, "PPO贪吃蛇讲解.html")
+    html_paths = [
+        os.path.join(_ROOT, "PPO贪吃蛇讲解.html"),
+        os.path.join(_ROOT, "PPO贪吃蛇讲解v2.html"),
+    ]
 
     # 仅同步模式：把现有模型权重烧录进讲解页后直接退出
     if args.embed_only:
         if not os.path.exists(best_model := "checkpoint/best_snake.json"):
             raise SystemExit(f"找不到 checkpoint/best_snake.json，请先训练")
-        embed_weights_to_html(best_model, html_path)
+        for hp in html_paths:
+            embed_weights_to_html(best_model, hp)
         return
 
     os.makedirs("checkpoint", exist_ok=True)
@@ -309,7 +313,8 @@ def main():
         print(f"如需手动同步，可运行:\n"
               f"    python scripts/train.py --embed-only   # 只同步讲解页，不训练")
     elif os.path.exists(best_path):
-        embed_weights_to_html(best_path, html_path)
+        for hp in html_paths:
+            embed_weights_to_html(best_path, hp)
 
 
 if __name__ == "__main__":

@@ -1,9 +1,11 @@
 // 端到端验证：模拟 HTML 中实时 AI 决策的完整逻辑（不依赖 DOM）
 // 从 HTML 中提取 playAI 相关的辅助函数（aiGetState / aiForward / aiAct）来跑
+// 用法：node scripts/verify_live_ai.js [html文件名]   （默认 PPO贪吃蛇讲解.html）
 const fs = require('fs');
 const vm = require('vm');
 
-const html = fs.readFileSync(require('path').join(__dirname, '..', 'PPO贪吃蛇讲解.html'), 'utf-8');
+const target = process.argv[2] || 'PPO贪吃蛇讲解.html';
+const html = fs.readFileSync(require('path').join(__dirname, '..', target), 'utf-8');
 
 // 提取 AI_MODEL 定义（内嵌为 JSON 对象，可能包含嵌套数组）
 const modelMatch = html.match(/var AI_MODEL = (\{[\s\S]*?\});/);

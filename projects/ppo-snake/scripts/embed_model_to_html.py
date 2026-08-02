@@ -1,4 +1,4 @@
-"""把 checkpoint/best_snake.json 的策略权重嵌入 PPO贪吃蛇讲解.html。
+"""把 checkpoint/best_snake.json 的策略权重嵌入讲解页。
 
 策略网络权重（W1/b1/W2p/b2p）以通用 JSON 格式保存，Python 和 JS 都能直接读；
 本脚本只负责把其中的「策略部分」提取出来，内嵌为页面的 var AI_MODEL，
@@ -6,8 +6,9 @@
 
 用法（在项目根运行）：
     python scripts/embed_model_to_html.py
+默认同步两个讲解页：PPO贪吃蛇讲解.html 与 PPO贪吃蛇讲解v2.html
 可选：
-    --html <PPO贪吃蛇讲解.html 的路径>   # 默认取项目根的同名文件
+    --html <讲解页路径>   # 只同步指定页面
 """
 import argparse
 import json
@@ -26,14 +27,15 @@ MODEL_JSON = os.path.join(ROOT, "checkpoint", "best_snake.json")
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--html", default=None,
-                    help="PPO贪吃蛇讲解.html 的路径（默认取项目根）")
+                    help="指定单个讲解页路径（默认同时同步两个讲解页）")
 args = parser.parse_args()
 
-HTML = args.html or os.path.join(ROOT, "PPO贪吃蛇讲解.html")
+HTMLS = ([args.html] if args.html else [
+    os.path.join(ROOT, "PPO贪吃蛇讲解.html"),
+    os.path.join(ROOT, "PPO贪吃蛇讲解v2.html"),
+])
 if not os.path.exists(MODEL_JSON):
     raise SystemExit(f"找不到模型 {MODEL_JSON}，请先运行 python scripts/train.py")
-if not os.path.exists(HTML):
-    raise SystemExit(f"找不到 {HTML}，请用 --html 显式指定")
 
 with open(MODEL_JSON, encoding="utf-8") as f:
     d = json.load(f)
@@ -52,26 +54,30 @@ def to_js(obj):
     return json.dumps(obj, separators=(",", ":"))
 
 script = (
-    "<script>/* 浏览器内实时运行的策略网络权重（由 embed_model_to_html.py 从"
-    " checkpoint/best_snake.json 内嵌，供「AI 自动玩」现场决策使用） */\n"
+    "<script>/* 浏览器内实时运行的策略网络权重（由 scripts/train.py 训练结束后"
+    "自动从 checkpoint/best_snake.json 内嵌，供「AI 自动玩」现场决策使用） */\n"
     "var AI_MODEL = " + to_js(ai_model) + ";\n"
     "</script>"
 )
 
-with open(HTML, encoding="utf-8") as f:
-    html = f.read()
+for HTML in HTMLS:
+    if not os.path.exists(HTML):
+        raise SystemExit(f"找不到 {HTML}，请用 --html 显式指定")
 
-# 替换已有的 AI_MODEL 块；没有则插入到回放数据块之前
-pattern = re.compile(
-    r'<script>/\* 浏览器内实时运行的策略网络权重[\s\S]*?</script>', re.MULTILINE)
-if pattern.search(html):
-    html = pattern.sub(lambda m: script, html, count=1)
-else:
-    anchor = "<script>/* 回放数据"
-    assert anchor in html, "找不到回放数据锚点"
-    html = html.replace(anchor, script + "\n" + anchor, 1)
+    with open(HTML, encoding="utf-8") as f:
+        html = f.read()
 
-with open(HTML, "w", encoding="utf-8") as f:
-    f.write(html)
+    # 替换已有的 AI_MODEL 块；没有则插到第一个内联 <script> 之前
+    pattern = re.compile(
+        r'<script>/\* 浏览器内实时运行的策略网络权重[\s\S]*?</script>', re.MULTILINE)
+    if pattern.search(html):
+        html = pattern.sub(lambda m: script, html, count=1)
+    else:
+        anchor = "<script>\n"
+        assert anchor in html, f"{HTML} 里找不到 <script> 锚点"
+        html = html.replace(anchor, script + "\n" + anchor, 1)
 
-print(f"已把 AI_MODEL（{len(script)//1024} KB）嵌入 {os.path.basename(HTML)}")
+    with open(HTML, "w", encoding="utf-8") as f:
+        f.write(html)
+
+    print(f"已把 AI_MODEL（{len(script)//1024} KB）嵌入 {os.path.basename(HTML)}")

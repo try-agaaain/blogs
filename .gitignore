@@ -5,3 +5,7 @@ Thumbs.db
 __pycache__/
 *.pyc
 site/
+
+# PPO 贪吃蛇训练产物
+projects/ppo-snake/experiments/
+projects/ppo-snake-2/experiments/

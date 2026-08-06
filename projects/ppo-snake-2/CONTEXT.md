@@ -19,6 +19,8 @@
   - `scripts/bc_train.py` — BC 预训练脚本（专家数据 → 交叉熵）
   - `scripts/train.py` — PPO 训练入口（纯 PPO 或 BC+PPO 微调，支持 `--step-penalty` / `--ent-coef` / `--kl-threshold`）
   - `scripts/play.py` — 终端可视化演示（默认贪心，`--sample` 切换随机）
+  - `scripts/embed_model_to_html.py` — 把 `best_snake.json` 权重 + `experiments/s6/train_log.csv` 曲线烧录进讲解页
+  - `PPO贪吃蛇讲解.html` — 交互式讲解页（仿旧项目 `ppo-snake/PPO贪吃蛇讲解v3.html`，10 章节 + 浏览器内实时 AI 推理演示）
   - `tests/` — 41 个单元测试（test_snake_game.py / test_snake_vec.py / test_ppo.py / test_expert.py / test_bc_train.py）
   - `best_snake.json` — 最优模型（s6，128 局贪心平均身长 70.2）
 
@@ -122,8 +124,9 @@ critic:  Linear(hidden → 1)     # 正交初始化 0.5
 
 ## 8. 待办事项（新对话继续）
 1. （已完成）正式训练目标平均身长 72：s6 达成，见 `best_snake.json`
-2. 若需继续优化：增大视野/网络、奖励 shaping、多 seed 稳定化
-3. （可选）更新 ppo-snake 的 HTML 讲解页
+2. （已完成）仿 `ppo-snake/PPO贪吃蛇讲解v3.html` 添加讲解页 `PPO贪吃蛇讲解.html`：内嵌 s6 权重（hidden112）与训练曲线；浏览器端用 JS 复刻 56 维 sim_rel 状态提取 + Bottleneck 前向（已验证与 Python 输出 logits 误差 < 1e-6）；`scripts/embed_model_to_html.py` 可随时重新烧录
+3. 若需继续优化：增大视野/网络、奖励 shaping、多 seed 稳定化
+4. （可选）更新 ppo-snake 的 HTML 讲解页
 
 - 终端文件目录：`C:/Users/tsingyue/.cursor/projects/d-Coding-Blogs/terminals/`（.txt 文件代表各终端）
 - 注意清理残留 python 进程：`tasklist //FI "IMAGENAME eq python.exe"` / `taskkill //F //T //PID <pid>`
